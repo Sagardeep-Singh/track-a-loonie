@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRightLeft, Check, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
-import { Modal } from '@/components/ui/modal';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { BudgetRing } from '@/components/budgets/budget-ring';
 import { deleteJSON, getJSON, patchJSON, postJSON, putJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
@@ -77,6 +77,10 @@ export const ZeroBasedView = ({
   const [targetEdit, setTargetEdit] = useState<TargetDraft | null>(null);
   const [targetPending, setTargetPending] = useState(false);
   const [targetError, setTargetError] = useState<string | null>(null);
+  // stable so the mobile sheet's focus/scroll-lock effect doesn't rerun on
+  // every keystroke
+  const closeTarget = useCallback((): void => setTargetEdit(null), []);
+  const closeMove = useCallback((): void => setMove(null), []);
 
   const { month, startMonth, categories, uncategorizedOnBudget } = data;
   const ready = Number(data.readyToAssign);
@@ -390,9 +394,9 @@ export const ZeroBasedView = ({
         as the category&apos;s spending limit, so it carries into later months until you change it.
       </p>
 
-      <Modal
+      <ResponsiveDialog
         open={targetEdit !== null}
-        onClose={() => setTargetEdit(null)}
+        onClose={closeTarget}
         title={targetEdit ? `Target for ${targetEdit.category.categoryName}` : 'Target'}
       >
         {targetEdit && (
@@ -451,9 +455,9 @@ export const ZeroBasedView = ({
             </div>
           </form>
         )}
-      </Modal>
+      </ResponsiveDialog>
 
-      <Modal open={move !== null} onClose={() => setMove(null)} title="Move money">
+      <ResponsiveDialog open={move !== null} onClose={closeMove} title="Move money">
         {move && (
           <form onSubmit={submitMove} className="flex flex-col gap-3">
             <div>
@@ -516,7 +520,7 @@ export const ZeroBasedView = ({
             </Button>
           </form>
         )}
-      </Modal>
+      </ResponsiveDialog>
     </div>
   );
 };
