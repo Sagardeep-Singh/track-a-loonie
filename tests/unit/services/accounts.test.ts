@@ -82,6 +82,33 @@ describe('createAccount', () => {
     );
     expect(result.balance).toBe('0.00');
   });
+
+  it('puts savings off-budget and everything else on-budget by default', async () => {
+    prismaMock.account.create.mockResolvedValue({
+      id: 'acc-3',
+      name: 'x',
+      type: 'CHECKING',
+      startingBalance: 0,
+      onBudget: true,
+      createdAt: new Date('2026-01-01'),
+      transactions: [],
+      importBatches: [],
+    });
+
+    await createAccount('user-1', { name: 'Savings', type: 'SAVINGS', startingBalance: 0 });
+    await createAccount('user-1', { name: 'Visa', type: 'CREDIT_CARD', startingBalance: 0 });
+    await createAccount('user-1', {
+      name: 'Rainy day',
+      type: 'SAVINGS',
+      startingBalance: 0,
+      onBudget: true,
+    });
+
+    const flags = prismaMock.account.create.mock.calls.map(
+      (call: unknown[]) => (call[0] as { data: { onBudget: boolean } }).data.onBudget,
+    );
+    expect(flags).toEqual([false, true, true]);
+  });
 });
 
 describe('updateAccount / deleteAccount', () => {

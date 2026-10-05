@@ -155,3 +155,32 @@ export const deleteBudget = async (userId: string, budgetId: string): Promise<vo
   }
   await prisma.budget.delete({ where: { id: budgetId } });
 };
+
+/**
+ * Effective spending limit per category for `month` (the newest row at or
+ * before it, same carry-forward rule as `listBudgets`). Zero-based mode reuses
+ * these limits as targets, so it needs the values without the spend
+ * aggregation `listBudgets` does, plus the row id and origin month so a
+ * target edit can patch in place or fork a new month like the limits screen.
+ */
+export const getEffectiveLimits = async (
+  userId: string,
+  month: number,
+): Promise<Map<string, { budgetId: string; month: number; limitAmount: number }>> => {
+  const rows = await prisma.budget.findMany({
+    where: { userId, month: { lte: month } },
+    select: { id: true, categoryId: true, month: true, limitAmount: true },
+    orderBy: [{ categoryId: 'asc' }, { month: 'desc' }],
+  });
+  const limits = new Map<string, { budgetId: string; month: number; limitAmount: number }>();
+  for (const row of rows) {
+    if (!limits.has(row.categoryId)) {
+      limits.set(row.categoryId, {
+        budgetId: row.id,
+        month: row.month,
+        limitAmount: Number(row.limitAmount),
+      });
+    }
+  }
+  return limits;
+};

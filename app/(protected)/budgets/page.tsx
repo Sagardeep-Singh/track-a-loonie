@@ -2,7 +2,9 @@ import { getServerAuthSession } from '@/lib/auth/session';
 import { listBudgets } from '@/lib/services/budgets';
 import { listCategories } from '@/lib/services/categories';
 import { getUncategorizedMonthSummary } from '@/lib/services/categorize';
+import { getBudgetSettings, getZbbMonth } from '@/lib/services/zeroBased';
 import { BudgetsView } from '@/components/budgets/budgets-view';
+import { ZeroBasedView } from '@/components/budgets/zero-based-view';
 import { ScreenHeader } from '@/components/nav/screen-header';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { getStoredPeriod } from '@/lib/period-cookie';
@@ -25,6 +27,25 @@ const BudgetsPage = async ({
   const month = monthParam
     ? Number(monthParam)
     : selectionMonth(await getStoredPeriod(), currentMonth());
+  const header = (description: string): React.ReactElement => (
+    <ScreenHeader
+      title="Budgets"
+      description={description}
+      periodSlot={<PeriodPopover month={month} basePath="/budgets" />}
+    />
+  );
+
+  const settings = await getBudgetSettings(userId);
+  if (settings.mode === 'ZERO_BASED') {
+    const zbbMonth = await getZbbMonth(userId, month);
+    return (
+      <div className="animate-[fade-up_0.3s_ease-out]">
+        {header('Give every dollar a job. Leftovers roll over to next month.')}
+        <ZeroBasedView key={month} initialMonth={zbbMonth} />
+      </div>
+    );
+  }
+
   const [budgets, categories, uncategorized] = await Promise.all([
     listBudgets(userId, month),
     listCategories(userId),
@@ -33,11 +54,7 @@ const BudgetsPage = async ({
 
   return (
     <div className="animate-[fade-up_0.3s_ease-out]">
-      <ScreenHeader
-        title="Budgets"
-        description="A monthly limit per category. Status follows the limit, not the calendar."
-        periodSlot={<PeriodPopover month={month} basePath="/budgets" />}
-      />
+      {header('A monthly limit per category. Status follows the limit, not the calendar.')}
       <BudgetsView
         initialBudgets={budgets}
         categories={categories}
