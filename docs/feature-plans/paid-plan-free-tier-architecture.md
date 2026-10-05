@@ -2,7 +2,8 @@
 
 Companion to `paid-plan-free-tier.md` (product scope and decisions). This is
 the software-architect design, grounded in the current code. File:line
-references are as of commit `6d7e09c` and may drift.
+references were refreshed against `main` at `f3e77bb` (after #86 rename, #88
+zero-based budgeting and #92 password reset) and may drift.
 
 ## Corrections to the product plan
 
@@ -34,6 +35,18 @@ The scope doc made a few assumptions that don't match the code:
    today. The Google `sub` is `account.providerAccountId` in the `jwt` callback
    (`lib/auth/config.ts:86`) and has to be passed through.
 9. **`stripe` is not installed.**
+10. **Password reset also verifies the email.** `resetPassword`
+    (`lib/services/passwordReset.ts:203`, added in #92) sets `emailVerified`
+    when it was null, since a valid reset link proves the mailbox. It is a
+    third trial start path alongside verification and Google signup.
+11. **Google emails are normalized now.** `findOrCreateGoogleUser` runs
+    `normalizeEmail` before the lookup (#92), so a mixed-case Google email
+    can't create a duplicate user.
+12. **Account deletion was reworked** for Google re-auth. The `$transaction`
+    is at `lib/services/accountDeletion.ts:48`, after the password and
+    `reauthenticatedAt` checks.
+13. **No account archive flag.** `Account` has no archived or soft-delete
+    column, so the free account limit counts every row for the user.
 
 ## 1. Schema
 
@@ -101,31 +114,57 @@ model TrialClaim {
 
   @@index([claimedAt])
 }
+
+/// Outbox for Stripe customers whose app account was deleted. No relation to
+/// User. Written in the deletion transaction, removed once Stripe confirms.
+model StripeCustomerCleanup {
+  stripeCustomerId String    @id
+  createdAt        DateTime  @default(now())
+  attempts         Int       @default(0)
+  lastAttemptAt    DateTime?
+  lastError        String?
+}
 ```
 
 - `stripeSubscriptionId` and `status` are nullable so the row can be created
   before Checkout and the Stripe customer is reused, never duplicated.
 - `onDelete: Cascade` removes the Subscription row with the user. It does not
   stop billing in Stripe; account deletion handles that (below).
-- `wipeUserData` (`userData.ts:198`) must not touch `Subscription`,
-  `TrialClaim` or the trial fields, so a data import never resets billing or
-  the trial. Export includes none of them.
+- `wipeUserData` (`userData.ts:220`) must not touch `Subscription`,
+  `TrialClaim`, `StripeCustomerCleanup` or the trial fields, so a data import
+  never resets billing or the trial. Export includes none of them.
+- `StripeCustomerCleanup` was added on 2026-10-05 to support the "never block
+  deletion" decision (section 9). It stores only the Stripe customer id.
 
 ### Account deletion
 
-In `lib/services/accountDeletion.ts`, after the password/Google checks (:128)
-and before the `prisma.$transaction` (:130), call
-`await cancelBillingForDeletion(userId)`:
+Deletion is never blocked by Stripe. It uses an outbox so a Stripe outage
+can't strand a live subscription:
 
-- When billing is enabled and a Subscription row exists, call
-  `stripe.customers.del(stripeCustomerId)`. That cancels every subscription at
-  once and removes stored cards.
-- A `resource_missing` error counts as success. Any other Stripe error throws
-  `BillingProviderError`, which `app/api/settings/account/route.ts` maps to 503
-  ("Couldn't cancel your subscription with Stripe. Try again.").
-- Later `customer.deleted` / `customer.subscription.deleted` webhooks find no
-  row and are ignored.
+1. In `lib/services/accountDeletion.ts`, inside the existing
+   `prisma.$transaction` (:48) and before `tx.user.delete`, read the user's
+   `Subscription.stripeCustomerId`. When there is one, insert a
+   `StripeCustomerCleanup` row with it (`createMany` + `skipDuplicates`).
+2. After the transaction commits, call
+   `await cancelBillingForDeletion(stripeCustomerId)` best effort:
+   `stripe.customers.del` cancels every subscription at once and removes
+   stored cards. On success, or on `resource_missing`, delete the outbox row.
+   On any other error, log it, bump `attempts`, set `lastError`, and still
+   return `{ ok: true }` to the user.
+3. The daily cron retries outbox rows (section 7). After 10 failed attempts
+   it logs at error level each run so the failure is visible.
+
+Outcomes:
+
+- No 503 path. `app/api/settings/account/route.ts` is unchanged.
+- If the DB transaction fails, Stripe was never touched, so the user keeps a
+  working account and a working customer (fixes the old ordering risk).
+- With billing off, step 1 still writes nothing (no Subscription row) and
+  step 2 is skipped.
+- Later `customer.subscription.deleted` webhooks find no row and are
+  ignored. `customer.deleted` isn't subscribed (section 4).
 - `TrialClaim` is never deleted here.
+- No refund on deletion (decision 1). The refund policy says so.
 
 ## 2. Files
 
@@ -138,7 +177,17 @@ export const isBillingEnabled = (): boolean; // Boolean(process.env.STRIPE_SECRE
 export const getStripe = (): Stripe; // globalThis singleton, apiVersion pinned
 export const priceIdFor = (interval: 'month' | 'year'): string; // BillingDisabledError if unset
 export const constructStripeEvent = (rawBody: string, signature: string | null): Stripe.Event; // WebhookSignatureError
+export const billingConfigProblems = (env?: NodeJS.ProcessEnv): string[]; // names of missing required vars, [] when billing is off
 ```
+
+**`instrumentation.ts`** (new, repo root): `register()` calls
+`billingConfigProblems()`. When `STRIPE_SECRET_KEY` is set and anything is
+missing, it throws in production (`NODE_ENV === 'production'`) so the deploy
+fails to boot, and logs a warning in dev. Required with billing on:
+`STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`,
+`TRIAL_HASH_KEY` (decision 7) and the Brevo vars `isEmailConfigured()` checks
+(decision 6). Read `node_modules/next/dist/docs/` for the Next 16
+instrumentation API before writing it.
 
 **`lib/services/entitlements.ts`**
 
@@ -165,7 +214,7 @@ export type PlanSummary = {
   plan: Plan;
   trialEndsAt: string | null;
   trialDaysLeft: number | null;
-  trialStatus: 'not_started' | 'active' | 'ended' | 'used'; // from emailVerified, trialStartedAt and now
+  trialStatus: 'not_started' | 'active' | 'ended' | 'used' | null; // null when billing is off
   subscription: {
     status: Lowercase<SubscriptionStatus>;
     interval: 'month' | 'year' | null;
@@ -193,6 +242,10 @@ export const normalizeEmailForTrial = (email: string): string;
   local part empty, keep the original (so `+x@gmail.com` stays distinct).
 - For `gmail.com` and `googlemail.com`: remove dots from the local part and
   map the domain to `gmail.com`.
+- If any step leaves the local part empty (`.+x@gmail.com`), return the
+  trimmed, lowercased original instead.
+- No `@`, or an empty domain: return the trimmed, lowercased input. Never
+  throws. Always idempotent (`f(f(x)) === f(x)`).
 
 **`lib/services/trialClaims.ts`**
 
@@ -212,9 +265,13 @@ export const pruneTrialClaims = (now: Date): Promise<number>; // claimedAt older
 
 1. `trialStartedAt` already set: return `already_started`.
 2. `TRIAL_HASH_KEY` unset: set `trialStartedAt = now`, return `started`. No
-   hashing or claim check.
-3. Otherwise compute `emailHash = hash(normalizeEmailForTrial(email))` and
-   `googleSubHash = googleSub ? hash('google:' + googleSub) : null`.
+   hashing or claim check. Only reachable with billing off, since the boot
+   check requires the key when billing is on (decision 7).
+3. Otherwise compute
+   `emailHash = hash('email:' + normalizeEmailForTrial(email))` and
+   `googleSubHash = googleSub ? hash('google:' + googleSub) : null`. Both
+   values carry a prefix so the two namespaces can never collide. An empty
+   `googleSub` counts as none.
 4. `tx.trialClaim.createMany({ data: [{ emailHash, googleSubHash, claimedAt: now }], skipDuplicates: true })`.
    A count of 0 means that email or Google account already has a claim:
    return `ineligible` and leave `trialStartedAt` null.
@@ -237,7 +294,8 @@ with its licence checked against AGPLv3.
 export const createCheckoutSession = (userId: string, interval: 'month' | 'year', now?: Date): Promise<{ url: string }>;
 export const createPortalSession = (userId: string): Promise<{ url: string }>;
 export const handleStripeEvent = (event: Stripe.Event): Promise<'processed' | 'duplicate' | 'ignored'>;
-export const cancelBillingForDeletion = (userId: string): Promise<void>;
+export const cancelBillingForDeletion = (stripeCustomerId: string): Promise<void>; // best effort, never throws to the caller
+export const retryStripeCustomerCleanups = (now: Date): Promise<{ attempted: number; cleaned: number; failed: number }>;
 ```
 
 **`lib/services/trialEmails.ts`**:
@@ -247,12 +305,19 @@ export const cancelBillingForDeletion = (userId: string): Promise<void>;
 `buildTrialEndingEmail({ appUrl, settingsUrl, trialEndsAt }): TransactionalEmail`,
 using `renderEmailHtml` like `account-exists-email.ts`.
 
+**`lib/email/subscription-cancelled-country-email.ts`** (decision 5):
+`buildCountryCancellationEmail({ appUrl, refunded }): TransactionalEmail`.
+Says the subscription was cancelled because the card isn't Canadian, whether
+a refund was issued, and that the free tier still works. Sent from the
+webhook handler after the cancel. A send failure is logged and never fails
+the webhook.
+
 **`lib/http/clientCountry.ts`**
 
 ```ts
 export const COUNTRY_HEADER = 'x-vercel-ip-country';
 export const clientCountryFromHeaders = (headers: Headers): string | null; // trimmed, uppercased, /^[A-Z]{2}$/ or null
-export const allowedSignupCountries = (env?: NodeJS.ProcessEnv): string[] | null; // null when unset/empty
+export const allowedSignupCountries = (env?: NodeJS.ProcessEnv): string[] | null; // null when unset/empty; [] (refuse all) plus an error log when set but no entry is a valid code
 export const isSignupCountryAllowed = (country: string | null, env?: NodeJS.ProcessEnv): boolean;
 ```
 
@@ -266,47 +331,48 @@ export const isSignupCountryAllowed = (country: string | null, env?: NodeJS.Proc
 `app/api/billing/portal/route.ts`, `app/api/billing/webhook/route.ts` (all
 POST).
 
-**UI:** `app/pricing/page.tsx` (public) and `components/billing/` (upgrade
-prompt, Plan section). Specced by ui-designer.
+**UI:** `app/pricing/page.tsx` (public, `notFound()` when billing is off) and
+`components/billing/` (upgrade prompt, Plan section). Specced by ui-designer.
 
 ### Modified, with gate placement
 
-| File:line                                                                                 | Change                                                                                                                                                                                                                                             |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lib/services/common.ts`                                                                  | `PlanFeature`, `PlanRequiredError`, `BillingDisabledError`, `BillingConflictError`, `BillingProviderError`                                                                                                                                         |
-| `lib/services/accounts.ts:67` (`createAccount`)                                           | `assertAccountLimit(userId)`; if `CREDIT_CARD` with non-null `statementDay`, `assertFeature(userId, 'statementCycles')`                                                                                                                            |
-| `lib/services/accounts.ts:97` (`updateAccount`)                                           | Gate `statementCycles` only when `statementDay` changes to a new non-null value. Clearing it stays allowed.                                                                                                                                        |
-| `lib/services/transactions.ts:157` (`createTransaction`)                                  | `if (input.isReimbursable) assertFeature(userId, 'reimbursements')`                                                                                                                                                                                |
-| `lib/services/transactions.ts:205` (`updateTransaction`)                                  | Gate only the false to true change of `isReimbursable`. Un-marking and editing an existing reimbursable stay allowed.                                                                                                                              |
-| `lib/services/reimbursements.ts:429` (`createReimbursementLink`)                          | `assertFeature(userId, 'reimbursements')`                                                                                                                                                                                                          |
-| `lib/services/reimbursements.ts:467` (`updateReimbursementLink`)                          | Same gate (pending decision, see section 9)                                                                                                                                                                                                        |
-| `lib/services/reimbursements.ts:498` (`deleteReimbursementLink`)                          | **No gate.** Links block deleting linked transactions/accounts, so blocking link deletion would trap free users' data.                                                                                                                             |
-| `lib/services/trends.ts:80` (`getSpendingTrends`)                                         | `if (range > 3) assertFeature(userId, 'trendsLongRange')` (backstop)                                                                                                                                                                               |
-| `lib/services/pushSubscriptions.ts:85` (`savePushSubscription`)                           | `assertFeature(userId, 'pushReminders')`. Delete and list stay ungated.                                                                                                                                                                            |
-| `lib/services/reminders.ts:127` (`updateReminderPreference`)                              | `if (input.enabled) assertFeature(userId, 'pushReminders')`. Turning off is always allowed.                                                                                                                                                        |
-| `lib/services/reminders.ts:251` (`sendDueReminders`)                                      | Skip free users (section 7)                                                                                                                                                                                                                        |
-| `lib/services/emailVerification.ts:148` (`consumeVerificationToken`)                      | Replace the batch transaction with an interactive one: load the user, set `emailVerified`, delete the token, `startTrialInTx(tx, user, { now })`. `ConsumeResult` is unchanged.                                                                    |
-| `lib/services/users.ts:65` (`findOrCreateGoogleUser`)                                     | Signature `(email, name, googleSub: string \| null)`. Lines 74-76 (existing unverified user) and 80 (new user): wrap the write and `startTrialInTx(tx, user, { googleSub, now })` in one transaction. Add `isGoogleSignInAllowed(email, country)`. |
-| `lib/services/users.ts:34` (`createUser`)                                                 | Only when email verification isn't configured: start the trial in the same transaction as `user.create` (pending decision 6).                                                                                                                      |
-| `lib/services/accountDeletion.ts:129`                                                     | `cancelBillingForDeletion(userId)`                                                                                                                                                                                                                 |
-| `lib/auth/actions.ts:93` (`signUpAction`)                                                 | Country check after parse, before rate limit                                                                                                                                                                                                       |
-| `lib/auth/config.ts:85-90`                                                                | New `signIn` callback (section 6); pass `account.providerAccountId` to `findOrCreateGoogleUser`                                                                                                                                                    |
-| `app/api/cron/reminders/route.ts:34`                                                      | Section 7                                                                                                                                                                                                                                          |
-| `app/api/accounts/route.ts:73`, `app/api/accounts/[id]/route.ts:103`                      | `PlanRequiredError` as the first catch branch                                                                                                                                                                                                      |
-| `app/api/reimbursement-links/route.ts:21`, `app/api/reimbursement-links/[id]/route.ts:53` | Same                                                                                                                                                                                                                                               |
-| `app/api/transactions/route.ts:72`, `app/api/transactions/[id]/route.ts:24`               | Same                                                                                                                                                                                                                                               |
-| `app/api/push/subscribe/route.ts:17`, `app/api/settings/reminders/route.ts:17`            | Add a try/catch: `PlanRequiredError` to 402, rethrow everything else                                                                                                                                                                               |
-| `app/api/settings/account/route.ts:30`                                                    | `BillingProviderError` to 503                                                                                                                                                                                                                      |
-| `app/(protected)/trends/page.tsx:55-56`                                                   | `hasFeature(userId, 'trendsLongRange')`, clamp to 3, pass `lockedRanges` to `RangePopover` and the mobile range links (:92-104)                                                                                                                    |
-| `components/trends/range-popover.tsx`                                                     | `lockedRanges` prop                                                                                                                                                                                                                                |
-| `app/(protected)/layout.tsx:24`                                                           | Add `getPlanSummary` to the `Promise.all` (trial countdown, payment-failed banner)                                                                                                                                                                 |
-| `app/(protected)/settings/page.tsx:11`                                                    | Pass `planSummary` to `SettingsView` (Plan section, locked reminders)                                                                                                                                                                              |
-| `components/settings/delete-account-card.tsx:100`, `:187`                                 | Copy (final wording by ui-designer): "To prevent repeat free trials, we keep a one-way hash of your email address for up to 2 years. It can't be turned back into your address and isn't linked to any data."                                      |
-| `app/(auth)/signup/page.tsx`                                                              | Canada-only state from `searchParams.error` and the country header; pricing link                                                                                                                                                                   |
-| `app/(auth)/login/page.tsx`                                                               | Pricing link                                                                                                                                                                                                                                       |
-| `lib/api-client.ts`                                                                       | `planFeatureOf(result): PlanFeature \| null` (402 and `code === 'plan_required'`)                                                                                                                                                                  |
-| `lib/push/client.ts:94`                                                                   | On 402, `subscription.unsubscribe()` so the browser isn't left subscribed                                                                                                                                                                          |
-| `.env.example`, `package.json` (`stripe`)                                                 |                                                                                                                                                                                                                                                    |
+| File:line                                                                                 | Change                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lib/services/common.ts`                                                                  | `PlanFeature`, `PlanRequiredError`, `BillingDisabledError`, `BillingConflictError`, `BillingProviderError`                                                                                                                                             |
+| `lib/services/accounts.ts:68` (`createAccount`)                                           | `assertAccountLimit(userId)`; if `CREDIT_CARD` with non-null `statementDay`, `assertFeature(userId, 'statementCycles')`. `onBudget` (#88) is never gated                                                                                               |
+| `lib/services/accounts.ts:90` (`updateAccount`)                                           | Gate `statementCycles` only when `statementDay` changes to a new non-null value (compare with the stored value; `undefined` means no change). Clearing it stays allowed                                                                                |
+| `lib/services/transactions.ts:153` (`createTransaction`)                                  | `if (input.isReimbursable) assertFeature(userId, 'reimbursements')`                                                                                                                                                                                    |
+| `lib/services/transactions.ts:179` (`updateTransaction`)                                  | Gate only the false to true change of `isReimbursable`. Un-marking and editing an existing reimbursable stay allowed                                                                                                                                   |
+| `lib/services/reimbursements.ts:425` (`createReimbursementLink`)                          | `assertFeature(userId, 'reimbursements')`                                                                                                                                                                                                              |
+| `lib/services/reimbursements.ts:462` (`updateReimbursementLink`)                          | Same gate (decision 2: editing counts as a new write)                                                                                                                                                                                                  |
+| `lib/services/reimbursements.ts:498` (`deleteReimbursementLink`)                          | **No gate.** Links block deleting linked transactions/accounts, so blocking link deletion would trap free users' data                                                                                                                                  |
+| `lib/services/trends.ts:76` (`getSpendingTrends`)                                         | `if (range > 3) assertFeature(userId, 'trendsLongRange')` (backstop)                                                                                                                                                                                   |
+| `lib/services/pushSubscriptions.ts:81` (`savePushSubscription`)                           | `assertFeature(userId, 'pushReminders')`. Delete and list stay ungated                                                                                                                                                                                 |
+| `lib/services/reminders.ts:123` (`updateReminderPreference`)                              | `if (input.enabled) assertFeature(userId, 'pushReminders')`. The schema always sends `enabled`, so a free user can't change cadence while enabled, and turning off is always allowed                                                                   |
+| `lib/services/reminders.ts:235` (`sendDueReminders`)                                      | Skip free users (section 7)                                                                                                                                                                                                                            |
+| `lib/services/emailVerification.ts:137` (`consumeVerificationToken`)                      | Replace the batch transaction with an interactive one: load the user, set `emailVerified`, delete the token, `startTrialInTx(tx, user, { now })`. `ConsumeResult` is unchanged                                                                         |
+| `lib/services/passwordReset.ts:203` (`resetPassword`)                                     | When `emailVerified` was null, switch the batch transaction to an interactive one and call `startTrialInTx(tx, user, { now })` after setting it. Already-verified users keep the batch path                                                            |
+| `lib/services/users.ts:66` (`findOrCreateGoogleUser`)                                     | Signature `(rawEmail, name, googleSub: string \| null)`. Existing unverified user and new user: wrap the write and `startTrialInTx(tx, user, { googleSub, now })` in one transaction. Add `isGoogleSignInAllowed(email, country)`                      |
+| `lib/services/users.ts:23` (`createUser`)                                                 | **No change.** Billing requires Brevo (decision 6), so credentials users always start the trial through verification or password reset                                                                                                                 |
+| `lib/services/accountDeletion.ts:48`                                                      | Outbox insert inside the transaction, then best-effort `cancelBillingForDeletion` after it (section 1)                                                                                                                                                 |
+| `lib/auth/actions.ts:89` (`signUpAction`)                                                 | Country check after parse, before rate limit                                                                                                                                                                                                           |
+| `lib/auth/config.ts:81-90`                                                                | New `signIn` callback (section 6); pass `account.providerAccountId` to `findOrCreateGoogleUser`                                                                                                                                                        |
+| `app/api/cron/reminders/route.ts:34`                                                      | Section 7                                                                                                                                                                                                                                              |
+| `app/api/accounts/route.ts:31`, `app/api/accounts/[id]/route.ts:24`                       | `PlanRequiredError` as the first catch branch                                                                                                                                                                                                          |
+| `app/api/reimbursement-links/route.ts:21`, `app/api/reimbursement-links/[id]/route.ts:23` | Same                                                                                                                                                                                                                                                   |
+| `app/api/transactions/route.ts:50`, `app/api/transactions/[id]/route.ts:23`               | Same                                                                                                                                                                                                                                                   |
+| `app/api/push/subscribe/route.ts`, `app/api/settings/reminders/route.ts`                  | Add a try/catch around the service call: `PlanRequiredError` to 402, rethrow everything else                                                                                                                                                           |
+| `app/(protected)/trends/page.tsx:55-56`                                                   | `hasFeature(userId, 'trendsLongRange')`, clamp to 3, pass `lockedRanges` to `RangePopover` (:82) and the mobile range links                                                                                                                            |
+| `components/trends/range-popover.tsx`                                                     | `lockedRanges` prop                                                                                                                                                                                                                                    |
+| `app/(protected)/layout.tsx:23`                                                           | Add `getPlanSummary` to the `Promise.all` (trial countdown, payment-failed banner)                                                                                                                                                                     |
+| `app/(protected)/settings/page.tsx`                                                       | Pass `planSummary` to `SettingsView` (Plan section, locked reminders)                                                                                                                                                                                  |
+| `components/settings/delete-account-card.tsx` (intro near :98, confirm dialog near :186)  | Shown only when `TRIAL_HASH_KEY` is set. Copy (final wording by ui-designer): "To prevent repeat free trials, we keep a one-way hash of your email address for up to 2 years. It can't be turned back into your address and isn't linked to any data." |
+| `app/(auth)/signup/page.tsx`                                                              | Canada-only state from `searchParams.error` and the country header; pricing link when billing is on                                                                                                                                                    |
+| `app/(auth)/login/page.tsx`                                                               | Pricing link when billing is on                                                                                                                                                                                                                        |
+| `app/pricing/page.tsx`                                                                    | `notFound()` when billing is off                                                                                                                                                                                                                       |
+| `lib/api-client.ts`                                                                       | `planFeatureOf(result): PlanFeature \| null` (402 and `code === 'plan_required'`)                                                                                                                                                                      |
+| `lib/push/client.ts:88`                                                                   | On 402, `subscription.unsubscribe()` so the browser isn't left subscribed                                                                                                                                                                              |
+| `.env.example`, `package.json` (`stripe`)                                                 |                                                                                                                                                                                                                                                        |
 
 ## 3. Error contract
 
@@ -326,7 +392,7 @@ export class PlanRequiredError extends ServiceValidationError {
 }
 export class BillingDisabledError extends Error {} // billing routes: 404
 export class BillingConflictError extends Error {} // already subscribed / no customer: 409
-export class BillingProviderError extends Error {} // Stripe failed: 502, or 503 on account deletion
+export class BillingProviderError extends Error {} // Stripe failed: 502
 ```
 
 - Plan error response: **402**
@@ -344,18 +410,29 @@ export class BillingProviderError extends Error {} // Stripe failed: 502, or 503
 **Checkout** (`createCheckoutSession`):
 
 1. Billing off: `BillingDisabledError`.
-2. Load the user and Subscription. Status in `PAID_STATUSES`:
-   `BillingConflictError` ("Manage your plan from the billing portal").
+2. Load the user and Subscription, then branch on `status`:
+   - `ACTIVE`, `TRIALING`, `PAST_DUE`, `UNPAID`, `PAUSED`:
+     `BillingConflictError` ("Manage your plan from the billing portal"). The
+     last two still hold a live Stripe subscription, so a new Checkout would
+     create a second one.
+   - `INCOMPLETE`: cancel the stale `stripeSubscriptionId` first (tolerate
+     `resource_missing`), then continue. Otherwise an abandoned 3-D Secure
+     step would lock the user out for Stripe's 23-hour expiry.
+   - `null`, `INCOMPLETE_EXPIRED`, `CANCELED`: continue.
 3. Reuse `stripeCustomerId`, or create the customer with
-   `metadata: { userId }` and idempotency key `ledger-customer-<userId>`, then
+   `metadata: { userId }` and idempotency key `tal-customer-<userId>`, then
    upsert the Subscription row.
 4. Session params: `mode: 'subscription'`, `customer`,
    `client_reference_id: userId`, `metadata: { userId }`, the CAD price for the
    interval, `billing_address_collection: 'required'`,
    `customer_update: { address: 'auto', name: 'auto' }`,
-   `payment_method_collection: 'always'`, `automatic_tax: { enabled: false }`,
-   `allow_promotion_codes: false`, `expires_at: now + 30 min`, success and
-   cancel URLs from `appBaseUrl()` (never the request Host).
+   `payment_method_types: ['card']` (the country rule is about cards, so no
+   Link, wallets or bank debits), `payment_method_collection: 'always'`,
+   `automatic_tax: { enabled: false }`, `allow_promotion_codes: false`,
+   `expires_at: now + 31 min` (Stripe's minimum is 30, the extra minute covers
+   clock drift), success URL `appBaseUrl() + '/settings?billing=success'` and
+   cancel URL `appBaseUrl() + '/settings?billing=cancelled'` (never the
+   request Host).
 5. **Trial carry-over:** if the user is in their app trial and
    `trialEndsAt(trialStartedAt)` is more than 49 hours away, set
    `subscription_data.trial_end` to it. Stripe rejects a `trial_end` under 48
@@ -380,6 +457,8 @@ duplicate. If anything throws, no row is written and Stripe retries.
 trusting the event snapshot. Find the row by `stripeCustomerId`; no row means
 log and ignore. `interval` and `currentPeriodEnd` come from
 `items.data[0]`. `cancelAtPeriodEnd = cancel_at_period_end || cancel_at != null`.
+An unknown status or a missing `items.data[0]` (API version drift) throws, so
+no `StripeEvent` row is written and Stripe retries while we fix it.
 **Stale-event guard:** only write when the row's `stripeSubscriptionId` is
 null, matches, or the row's status isn't paid.
 
@@ -394,10 +473,13 @@ null, matches, or the row's status isn't paid.
 
 **Card-country backstop:** when the card country is known and isn't `CA`,
 cancel the customer's live subscriptions, refund the charge (for
-`charge.succeeded`, idempotency key `ledger-refund-<chargeId>`), then sync.
-Radar may not evaluate no-charge trial checkouts, so this is the real control
-during a Stripe trial. Subscribe the webhook endpoint to exactly these 6
-events with the pinned API version.
+`charge.succeeded`, idempotency key `tal-refund-<chargeId>`), sync, then send
+the country cancellation email (decision 5). A trialing subscription has no
+charge, so it's cancelled with no refund. When the country is unknown, allow
+it and log a warning with the customer id (decision 4). Radar may not
+evaluate no-charge trial checkouts, so this is the real control during a
+Stripe trial. Subscribe the webhook endpoint to exactly these 6 events with
+the pinned API version. `customer.deleted` is deliberately not one of them.
 
 ## 5. Entitlements truth table (`resolvePlan`)
 
@@ -419,11 +501,18 @@ Top to bottom. `trialEnd = trialStartedAt + 30 days`.
 - A user who cancels stays ACTIVE with `cancelAtPeriodEnd` until
   `customer.subscription.deleted`, so stays paid until then.
 - `trialDaysLeft = ceil((trialEnd - now) / day)` on trial, otherwise null.
+- Paid while the app trial is still running (upgraded early): `plan` is
+  `paid`, `trialStatus` is `active`, `trialDaysLeft` is null and
+  `trialEndsAt` is still set, so the Plan section can say "You won't be
+  charged until <date>".
+- Billing off: `trialStatus`, `trialEndsAt` and `trialDaysLeft` are null.
+- `getPlan` for a user id with no row returns `free`. The caller's session is
+  stale, and the next service call will fail on its own.
 
 ## 6. Signup country check
 
 - **Credentials (`signUpAction`):** after the Zod parse, before the rate limit
-  and `createUser`, so a refused attempt writes nothing. Error: "Ledger is only
+  and `createUser`, so a refused attempt writes nothing. Error: "Track a Loonie is only
   available in Canada." The same answer whether or not the email exists.
 - **Signup page:** pre-renders the Canada-only state from the same header, so
   most visitors never see the form.
@@ -433,32 +522,52 @@ Top to bottom. `trialEnd = trialStartedAt + 30 days`.
   cleaner than throwing in `findOrCreateGoogleUser`, which runs in the `jwt`
   callback and would land on Auth.js's generic error page.
 - **Missing header:** with `ALLOWED_SIGNUP_COUNTRIES` unset the check is off.
-  When it's set, a missing or malformed header is refused (fails closed).
+  When it's set, a missing or malformed header is refused (fails closed). A
+  value with no valid code at all (for example `CAN`) refuses everyone and
+  logs an error, rather than silently turning the check off.
+- **Header access in the callback:** the `signIn` callback reads the country
+  with `headers()` from `next/headers`, same as `signUpAction`. Confirm this
+  works inside an Auth.js callback against the Next 16 docs in
+  `node_modules/next/dist/docs/` before relying on it. The "is this a new
+  user" lookup uses `normalizeEmail`, matching `findOrCreateGoogleUser`.
 - **E2E:** set `ALLOWED_SIGNUP_COUNTRIES=CA` in the Playwright webServer env,
   default `extraHTTPHeaders: { 'x-vercel-ip-country': 'CA' }`, and override to
   `US` in the refusal spec. The Google path can't be tested end to end.
 
 ## 7. Cron
 
-**`sendDueReminders` (`reminders.ts:251`):** after loading prefs, filter with
-`listUserIdsWithFeature(..., 'pushReminders', now)`. `lastEvaluatedAt` still
-updates for every enabled pref. Add `skippedNotEntitled` to the summary. Free
-users' prefs stay enabled so reminders resume on upgrade.
+**`sendDueReminders` (`reminders.ts:235`):** after working out which prefs
+are due, filter them with `listUserIdsWithFeature(dueUserIds, 'pushReminders', now)`.
+`lastEvaluatedAt` still updates for every enabled pref. Add
+`skippedNotEntitled` to the summary: the count of due users skipped for being
+on free (not every enabled free user). Free users' prefs stay enabled so
+reminders resume on upgrade.
 
 **`sendTrialEndingEmails(now)`:** no-op unless billing and email are both
 configured. Candidates (`take: 200`): `trialReminderSentAt` null,
-`trialStartedAt` between `now - 30d` and `now - 25d`, and no paid subscription
-(include an explicit `status: null` branch, since SQL `NOT IN` drops NULLs).
+`trialStartedAt > now - 30d` (trial still running) and
+`trialStartedAt <= now - 25d` (5 days or fewer left), and no paid
+subscription (include an explicit `status: null` branch, since SQL `NOT IN`
+drops NULLs). A user missed for 5 straight failed runs gets no email; that's
+accepted.
 For each: claim with `updateMany({ where: { id, trialReminderSentAt: null } })`,
 send, and reset to null on `EmailSendError` so the next run retries.
 
 **`pruneTrialClaims(now)`:** deletes `TrialClaim` rows with
 `claimedAt` older than 2 years.
 
-**`app/api/cron/reminders/route.ts:34`:** run all three with
+**`retryStripeCustomerCleanups(now)`:** no-op when billing is off. Takes up
+to 50 `StripeCustomerCleanup` rows, oldest first, and calls
+`stripe.customers.del` for each. Success or `resource_missing` deletes the
+row; any other error bumps `attempts` and records `lastError`. Rows past 10
+attempts are logged at error level on every run.
+
+**`app/api/cron/reminders/route.ts:34`:** run all four with
 `Promise.allSettled` so one failing job doesn't block the others, and respond
-`{ ...reminderSummary, trialEmails, trialClaimsPruned }`. The prune runs
-whether or not billing is on.
+`{ ...reminderSummary, trialEmails, trialClaimsPruned, stripeCleanups }`. A
+rejected job's key is `{ error: true }` (details go to the log, not the
+body). The status is 500 when any job rejected, so Vercel Cron shows the run
+as failed, and 200 otherwise. The prune runs whether or not billing is on.
 
 ## 8. Env vars (`.env.example`)
 
@@ -466,7 +575,9 @@ whether or not billing is on.
 # optional: enables the paid plan. Unset, billing is off: every user gets
 # every feature and no plan/billing UI renders (self-hosted default).
 # STRIPE_SECRET_KEY="sk_live_..."
-# signing secret for /api/billing/webhook. Required when STRIPE_SECRET_KEY is set.
+# When STRIPE_SECRET_KEY is set, a production boot fails unless
+# STRIPE_WEBHOOK_SECRET, both price ids, TRIAL_HASH_KEY and Brevo are set too.
+# signing secret for /api/billing/webhook.
 # STRIPE_WEBHOOK_SECRET="whsec_..."
 # CAD recurring price ids for C$4/month and C$40/year
 # STRIPE_PRICE_MONTHLY="price_..."
@@ -477,13 +588,13 @@ whether or not billing is on.
 # ALLOWED_SIGNUP_COUNTRIES="CA"
 # optional: blocks repeat free trials (delete and re-signup, Gmail +tag/dot
 # aliases, reused Google account). Keys the HMAC-SHA256 of normalized emails
-# and Google ids in TrialClaim. openssl rand -base64 32. Unset, no repeat-trial
-# checks (self-host default). Rotating it voids every past claim, so treat it
-# as permanent.
+# and Google ids in TrialClaim. openssl rand -base64 32. Required when billing
+# is on. Unset with billing off, nothing is checked (self-host default).
+# Rotating it voids every past claim, so treat it as permanent.
 # TRIAL_HASH_KEY="..."
 ```
 
-## 9. Risks and open decisions
+## 9. Risks and decisions
 
 **Risks:**
 
@@ -494,9 +605,9 @@ whether or not billing is on.
 - Account limit is count-then-create, so two concurrent creates could make a
   3rd account. Accepted.
 - Two concurrent Checkouts could create two subscriptions. Partly mitigated by
-  the 30-minute expiry and the 409 for paid users.
-- Brevo's 300/day free limit is shared with verification emails; the
-  `take: 200` cap matters.
+  the 31-minute expiry and the 409 for live subscriptions.
+- Brevo's 300/day free limit is shared with verification and password reset
+  emails; the `take: 200` cap matters.
 - `StripeEvent` grows forever. Optionally prune rows older than 90 days.
 - Rotating `TRIAL_HASH_KEY` voids every past claim. Add a runbook note next
   to `docs/runbooks/rotate-secret-encryption-key.md`.
@@ -504,31 +615,41 @@ whether or not billing is on.
   mailboxes at providers without `+` aliases. That only costs a trial.
   Outlook dots, custom domains and catch-alls aren't caught.
 - With verification on the trial path, a lost link means no trial until the
-  user resends it from the existing banner.
-- E2E free-user tests need billing on with a dummy `STRIPE_SECRET_KEY` (gates
-  make no Stripe calls) and a seeded user whose trial has expired.
+  user resends it from the existing banner or resets their password.
+- A Stripe customer in the cleanup outbox keeps billing until the retry
+  succeeds. Stripe outages are short and the cron runs daily; a renewal
+  charged in that gap is refunded by hand.
+- E2E free-user tests need billing on with dummy Stripe, Brevo and
+  `TRIAL_HASH_KEY` values (gates make no Stripe calls) and a seeded user
+  whose trial has expired.
 
-**Open decisions (product owner):**
+**Decisions (product owner, resolved 2026-10-05):**
 
-1. Refund on account deletion? Proposed: no refund, per the refund policy.
-2. Can a free user edit an existing reimbursement link's amount? Proposed: no,
-   it counts as a new write.
-3. Should data import (`importUserData`, `userData.ts:263`) bypass the gates?
-   Proposed: yes, it's a restore of the user's own data.
-4. Allow a card whose country Stripe can't determine? Proposed: allow and log.
-5. How to tell a user their subscription was cancelled for a non-Canadian
-   card? Proposed: an email from the webhook handler, no schema field.
-6. Billing on but email (Brevo) not configured: start the trial at signup
-   (weaker, no mailbox proof), or make billing require Brevo? Proposed: make
-   billing require Brevo in production.
-7. Billing on but `TRIAL_HASH_KEY` unset: allow (anyone can re-trial) or treat
-   the key as required when `STRIPE_SECRET_KEY` is set? Proposed: required.
+1. Refund on account deletion: **no**, per the refund policy.
+2. Free user editing an existing reimbursement link: **blocked**, it counts
+   as a new write. Deleting a link stays allowed.
+3. Data import (`importUserData`, `userData.ts:262`): **bypasses the gates**,
+   it's a restore of the user's own data. It never touches billing or trial
+   fields.
+4. Card whose country Stripe can't determine: **allow and log.**
+5. Subscription cancelled for a non-Canadian card: **email the user** from
+   the webhook handler. No schema field.
+6. Billing on without Brevo: **not allowed in production.** The boot check
+   fails. So the trial-at-signup fallback in `createUser` is dropped.
+7. Billing on without `TRIAL_HASH_KEY`: **not allowed in production.** Same
+   boot check.
+8. Zero-based budgeting (#88): **free.** It's core budgeting, no gate.
+9. Account deletion when Stripe is down: **never blocked.** Outbox plus a
+   daily retry (section 1).
+10. `/pricing` with billing off: **404.**
 
 ## 10. Implementation checklist
 
 - [ ] `npm i stripe`; env vars in `.env.example`
+- [ ] `instrumentation.ts` boot check (`billingConfigProblems`) + tests
 - [ ] Schema: enums, `Subscription`, `StripeEvent`, `TrialClaim`,
-      `User.trialStartedAt`, `User.trialReminderSentAt`;
+      `StripeCustomerCleanup`, `User.trialStartedAt`,
+      `User.trialReminderSentAt`;
       `npm run prisma:migrate -- --name paid_plan`, `npm run prisma:generate`
 - [ ] `common.ts` errors and `PlanFeature`; `lib/http/planRequired.ts`;
       `planFeatureOf` in `lib/api-client.ts`
@@ -538,9 +659,10 @@ whether or not billing is on.
 - [ ] `trialClaims.ts` (`startTrialInTx`, hashing, `pruneTrialClaims`) +
       tests
 - [ ] `consumeVerificationToken` interactive transaction that starts the trial
-- [ ] `findOrCreateGoogleUser(email, name, googleSub)` with trial start at
-      lines 74-76 and 80; pass `account.providerAccountId` from `config.ts:90`
-- [ ] `createUser` trial start when email isn't configured (pending decision 6)
+- [ ] `resetPassword` starts the trial when it verifies the email
+- [ ] `findOrCreateGoogleUser(rawEmail, name, googleSub)` with trial start for
+      new and unverified users; pass `account.providerAccountId` from
+      `config.ts:86`
 - [ ] `TRIAL_HASH_KEY` rotation runbook note
 - [ ] `clientCountry.ts` + tests; `signUpAction` check; `signIn` callback;
       update auth and users tests
@@ -550,10 +672,14 @@ whether or not billing is on.
 - [ ] Trends page clamp and `lockedRanges`
 - [ ] Push client 402 handling
 - [ ] `billing.ts`, validator, 3 routes + `billing.test.ts`
-- [ ] `accountDeletion.ts` hook, 503 mapping, deletion copy + test that
-      `TrialClaim` rows survive
-- [ ] `trialEmails.ts`, email builder, `pruneTrialClaims`, cron route,
+- [ ] Country cancellation email builder + test
+- [ ] `accountDeletion.ts` outbox and best-effort cancel, deletion copy +
+      tests that deletion succeeds when Stripe fails and `TrialClaim` rows
+      survive
+- [ ] `trialEmails.ts`, email builder, `pruneTrialClaims`,
+      `retryStripeCustomerCleanups`, cron route (500 on any failed job),
       reminders free-user skip + tests
+- [ ] `/pricing` 404 with billing off
 - [ ] UI per ui-designer spec, including "verify to start your trial" and
       "trial already used" states
 - [ ] Privacy policy wording for `TrialClaim`: what (keyed hash of normalized

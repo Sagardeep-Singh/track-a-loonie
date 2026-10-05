@@ -2,12 +2,13 @@
 
 ## Status
 
-Scoped, decisions locked (see below). Next: software-architect, ui-designer and
-tester test plans. Nothing here is implemented.
+Scoped, architected and test-planned. Every open decision was resolved on
+2026-10-05. Next: ui-designer spec, then implementation. Nothing here is
+implemented.
 
 ## Goal
 
-Keep Ledger free for everyday budgeting and add one paid plan that covers
+Keep Track a Loonie free for everyday budgeting and add one paid plan that covers
 hosting costs. The app is for Canadian users only, priced in CAD, with
 payments through Stripe directly (no merchant of record).
 
@@ -24,6 +25,15 @@ Locked by the product owner:
 7. **Payments:** Stripe.
 8. **One trial per person:** deleting an account and signing up again does
    not give a second trial. The trial starts only once the email is verified.
+9. **Zero-based budgeting is free.** It's core budgeting, like monthly
+   budgets.
+10. **Billing never blocks account deletion.** If Stripe is down, the account
+    is still deleted and the Stripe cancel is retried by the daily cron.
+11. **No refund on account deletion.** The refund policy says so.
+12. **Billing needs Brevo and `TRIAL_HASH_KEY`.** A production deploy with
+    Stripe on and either missing fails to boot.
+
+The architecture doc (section 9) has the smaller technical decisions.
 
 ## Pricing
 
@@ -57,6 +67,7 @@ per user is close to zero because AI categorization uses the user's own key.
 | Bank CSV presets (RBC, TD, Scotia, BMO, CIBC, Tangerine, Wealthsimple) | Yes           | Yes              |
 | Categories, rules, Categorize queue                                    | Yes           | Yes              |
 | Monthly budgets, Overview, drilldowns                                  | Yes           | Yes              |
+| Zero-based budgeting                                                   | Yes           | Yes              |
 | Transfer matching                                                      | Yes           | Yes              |
 | AI suggestions (BYOK)                                                  | Yes           | Yes              |
 | Full transaction history                                               | Yes           | Yes              |
@@ -78,18 +89,23 @@ Principles:
 - Self-hosted installs get everything. Billing is off when `STRIPE_SECRET_KEY`
   is unset, the same way AI categorization disappears without
   `SECRET_ENCRYPTION_KEY`. The country check is off when
-  `ALLOWED_SIGNUP_COUNTRIES` is unset.
+  `ALLOWED_SIGNUP_COUNTRIES` is unset. With billing off, `/pricing` returns 404.
+- Data import is a restore, so it bypasses the plan gates. Importing 5
+  accounts on the free tier works; creating a 6th by hand doesn't.
 
 ## Trial
 
 - App-side trial with no card required. It lasts 30 days from when it starts.
-- The trial starts when the email is verified: when a credentials user clicks
-  the verify link, or at signup for Google users (Google already verified the
-  address). Until then the user is on the free tier.
+- The trial starts when the email is verified. That happens in one of three
+  ways: a credentials user clicks the verify link, a credentials user
+  completes a password reset (the reset link proves the mailbox too), or a
+  Google user signs up (Google already verified the address). Until then the
+  user is on the free tier.
 - During the trial the user has every paid feature.
 - Upgrading during the trial creates the Stripe subscription with
   `subscription_data.trial_end` set to the app trial end, so the user isn't
-  charged until their free month is over.
+  charged until their free month is over. Stripe needs at least 48 hours of
+  trial, so in the last 2 days the card is charged right away.
 - Email reminder 5 days before the trial ends, sent by the existing daily cron
   via Brevo. One reminder only.
 - When the trial ends without a subscription, the user drops to free with all
@@ -105,7 +121,8 @@ Account deletion removes the `User` row, and data export/import makes
 - **Keyed hash, never the email.** HMAC-SHA256 with a server secret
   (`TRIAL_HASH_KEY`). A plain SHA-256 of an email can be reversed by guessing
   addresses; an HMAC can only be checked against an address we already have.
-  The check is off when the key is unset (self-hosting).
+  The key is required when billing is on. With billing off (self-hosting) the
+  check is off.
 - **Normalize before hashing** so aliases match: lowercase, trim, strip a
   `+tag` from the local part, and drop dots in the local part for gmail.com
   and googlemail.com (treated as the same domain).
@@ -117,9 +134,9 @@ Account deletion removes the `User` row, and data export/import makes
 - **Verified email required** for the trial (see Trial). Without this, fake
   addresses would give unlimited trials, since verification doesn't gate
   access today.
-- **Optional:** block disposable email domains for trial eligibility only (not
-  signup), using a maintained blocklist package. Tradeoff: one more dependency
-  and occasional false positives.
+- **Not in v1:** blocking disposable email domains. The lists go stale and
+  often flag privacy relays (SimpleLogin, Firefox Relay, iCloud Hide My
+  Email). It can be added later as a trial-only check.
 - **Not used:** IP, device or card fingerprints. Households share IPs,
   fingerprinting adds privacy risk, the trial needs no card, and the most
   anyone can gain is C$4 a month.
@@ -137,26 +154,27 @@ signups and make sure every payment comes from a Canadian card.
   request) in a new `lib/http/clientCountry.ts`, alongside
   `lib/http/clientIp.ts`. Refuse new accounts when the country isn't in
   `ALLOWED_SIGNUP_COUNTRIES` (`CA`). Applies to both
-  `signUpAction` (credentials) and `findOrCreateGoogleUser` (only when the
-  Google user is new). Show a clear "Ledger is only available in Canada"
-  message.
+  `signUpAction` (credentials) and new Google users (a `signIn` callback,
+  see the architecture doc). Show a clear "Track a Loonie is only available
+  in Canada" message.
 - **Login:** not geo-checked. Existing users travelling abroad can still sign
   in.
-- **Checkout:** require a billing address in Stripe Checkout and add a Stripe
-  Radar rule `Block if :card_country: != 'CA'`. Custom Radar rules may need
-  Radar for Fraud Teams (extra per-transaction fee), so confirm in the Stripe
-  dashboard. As a backstop, the webhook handler cancels and refunds any
-  subscription whose card country isn't `CA`.
-- **Local dev and e2e:** the header is missing outside Vercel. Treat a missing
-  header as allowed when `ALLOWED_SIGNUP_COUNTRIES` is unset, and let e2e set
-  it explicitly.
+- **Checkout:** cards only, require a billing address in Stripe Checkout,
+  and add a Stripe Radar rule `Block if :card_country: != 'CA'`. Custom Radar
+  rules may need Radar for Fraud Teams (extra per-transaction fee), so
+  confirm in the Stripe dashboard. As a backstop, the webhook handler cancels
+  and refunds any subscription whose card country isn't `CA`, and emails the
+  user to say why. A card with no known country is allowed and logged.
+- **Local dev and e2e:** the header is missing outside Vercel. With
+  `ALLOWED_SIGNUP_COUNTRIES` unset the check is off. When it's set, a missing
+  header is refused, so e2e sends `x-vercel-ip-country` explicitly.
 
 ## User stories
 
 1. As a new Canadian user, I can sign up with no card and get every paid
    feature for a month once I verify my email.
-2. As a visitor outside Canada, I see that Ledger is only available in Canada
-   and can't create an account.
+2. As a visitor outside Canada, I see that Track a Loonie is only available
+   in Canada and can't create an account.
 3. As a trial user, I get an email 5 days before my trial ends, and I can
    subscribe without losing the rest of my free month.
 4. As a free user, when I hit a paid feature or a limit, I see what the paid
@@ -169,11 +187,14 @@ signups and make sure every payment comes from a Canadian card.
    then drop to free with my data intact.
 8. As a paid user whose payment fails, I see a banner asking me to update my
    card and keep access during Stripe's retry window.
+9. As a paid user, I can delete my account even when Stripe is having a bad
+   day, and my subscription still gets cancelled.
 
 ## Acceptance criteria
 
-- [ ] New users have paid features for 30 days from email verification (or
-      Google signup) with no card. Unverified users are on the free tier.
+- [ ] New users have paid features for 30 days from email verification
+      (verify link, password reset or Google signup) with no card. Unverified
+      users are on the free tier.
 - [ ] A user whose normalized email or Google id already claimed a trial,
       including on a deleted account, starts on the free tier.
 - [ ] Deleting an account keeps its `TrialClaim` row, and the deletion
@@ -199,9 +220,15 @@ signups and make sure every payment comes from a Canadian card.
 - [ ] Upgrading during the trial doesn't charge until the trial ends.
 - [ ] Plan status updates only from verified Stripe webhooks, and each event is
       processed once (idempotent).
-- [ ] A subscription paid with a non-Canadian card is cancelled and refunded.
-- [ ] With Stripe env vars unset, every user is treated as paid and no billing
-      UI renders.
+- [ ] A subscription paid with a non-Canadian card is cancelled and refunded,
+      and the user gets an email saying why.
+- [ ] Account deletion succeeds when Stripe is unreachable, and the Stripe
+      customer is deleted by a later cron run.
+- [ ] A production deploy with `STRIPE_SECRET_KEY` set fails to boot when the
+      webhook secret, a price id, `TRIAL_HASH_KEY` or Brevo is missing.
+- [ ] With Stripe env vars unset, every user is treated as paid, no billing
+      UI renders and `/pricing` is a 404.
+- [ ] Zero-based budgeting works the same on every plan.
 
 ## Technical outline
 
@@ -229,8 +256,8 @@ Not legal or tax advice. Confirm with an accountant before launch.
 
 - Unit (`tests/unit/services/`):
   - `entitlements.test.ts`: free, trial (day 0, day 29, day 31) and paid per
-    subscription status, billing disabled, account limit, Trends range gate,
-    each feature gate.
+    subscription status, billing disabled, account limit, each feature gate.
+    The Trends range gate is tested in `trends.test.ts`.
   - `billing.test.ts`: each webhook event maps to the right subscription state,
     duplicate events are no-ops, unknown events are ignored, non-Canadian card
     is cancelled and refunded, checkout carries the trial end.
@@ -242,6 +269,11 @@ Not legal or tax advice. Confirm with an accountant before launch.
     retention purge.
   - Gate tests added to the existing service tests for accounts,
     reimbursements, trends and reminders, plus the one-time trial email.
+  - Trial start from `consumeVerificationToken`, `resetPassword` and
+    `findOrCreateGoogleUser`.
+  - Account deletion with Stripe failing still deletes, and the cleanup
+    retry clears the outbox.
+- Full case lists are in `paid-plan-free-tier-test-plan.md`.
 - E2E (`tests/e2e/`):
   - New user verifies email, then sees trial status and can use paid
     features.
@@ -260,15 +292,21 @@ Not legal or tax advice. Confirm with an accountant before launch.
 - [ ] ui-designer: Plan section, upgrade prompt, locked Trends ranges, trial
       countdown, pricing page, Canada-only signup state, banner
 - [x] tester: unit and e2e test plans (`paid-plan-free-tier-test-plan.md`)
-- [ ] Schema migration for `Subscription`, `StripeEvent` and
+- [ ] Schema migration for `Subscription`, `StripeEvent`, `TrialClaim`,
+      `StripeCustomerCleanup`, `User.trialStartedAt` and
       `User.trialReminderSentAt`
+- [ ] Boot check: billing requires webhook secret, prices, `TRIAL_HASH_KEY`
+      and Brevo
 - [ ] `entitlements.ts` + `PlanRequiredError` with tests
 - [ ] Signup country check with tests
-- [ ] `TrialClaim` + trial start on verification with tests
+- [ ] `TrialClaim` + trial start on verification, password reset and Google
+      signup with tests
 - [ ] Deletion confirmation copy about the kept hash
 - [ ] `TrialClaim` retention sweep in the daily cron
 - [ ] Gates in existing services with tests
 - [ ] `billing.ts` + checkout, portal and webhook routes with tests
+- [ ] Non-Canadian card cancellation email
+- [ ] Account deletion outbox and Stripe cleanup retry in the daily cron
 - [ ] Trial-ending email in the daily cron
 - [ ] Settings Plan section, upgrade prompts and trial countdown
 - [ ] Pricing page
