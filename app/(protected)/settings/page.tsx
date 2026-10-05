@@ -1,6 +1,7 @@
 import { getServerAuthSession } from '@/lib/auth/session';
 import { SettingsView } from '@/components/settings/settings-view';
 import { ScreenHeader } from '@/components/nav/screen-header';
+import { SourceLink } from '@/components/nav/source-link';
 import { userHasPassword } from '@/lib/services/users';
 import { getReminderPreference } from '@/lib/services/reminders';
 import { listPushSubscriptions } from '@/lib/services/pushSubscriptions';
@@ -35,6 +36,7 @@ const SettingsPage = async (): Promise<React.ReactElement> => {
         aiSettings={aiSettings}
         aiModels={aiModels}
       />
+      <SourceLink className="mt-12 text-center" />
     </div>
   );
 };
