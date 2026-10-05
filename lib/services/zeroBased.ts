@@ -133,7 +133,9 @@ const onBudgetBalanceCents = async (userId: string, accountIds: string[]): Promi
  * `listBudgets`). A transfer leg counts only when its counterpart sits on an
  * off-budget account — money leaving the budget for savings is spending from
  * the budget's point of view; a card payment between two on-budget accounts
- * isn't.
+ * isn't. Spread expenses deliberately count in their payment month here, not
+ * through their monthly shares: Ready to Assign is derived from real account
+ * balances, and deferring activity the cash already covered would unbalance it.
  */
 const categoryActivity = async (
   userId: string,

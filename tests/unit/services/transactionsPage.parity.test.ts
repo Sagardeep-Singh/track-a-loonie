@@ -127,6 +127,9 @@ const tx = (overrides: Partial<Row> = {}): Row => ({
   reimbursementCompletedManually: false,
   isReimbursementIncome: false,
   reimbursementIncomeLinkedTotal: '0.00',
+  spreadStartMonth: null,
+  spreadMonths: null,
+  spreadMonthlyAmount: null,
   ...overrides,
 });
 

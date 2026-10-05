@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   buildTransactionPayload,
+  yyyymmToMonthInput,
   type TransactionFormValues,
 } from '@/lib/transactions/transaction-payload';
 import type { FrontendAccount } from '@/lib/services/accounts';
@@ -30,6 +31,14 @@ export type TransactionFormHook = {
   reimbursementExpectedAmount: string;
   setReimbursementExpectedAmount: (value: string) => void;
   canBeReimbursable: boolean;
+  isSpread: boolean;
+  setIsSpread: (value: boolean) => void;
+  /** `<input type="month">` value, e.g. "2026-01" */
+  spreadStartMonth: string;
+  setSpreadStartMonth: (value: string) => void;
+  spreadMonths: string;
+  setSpreadMonths: (value: string) => void;
+  canBeSpread: boolean;
   pending: boolean;
   error: string | null;
   suggestFor: (payee: string, note: string) => void;
@@ -70,10 +79,20 @@ export const useTransactionForm = ({
   const [reimbursementExpectedAmount, setReimbursementExpectedAmount] = useState(
     transaction?.reimbursementExpectedAmount ?? '',
   );
+  const [isSpread, setIsSpread] = useState(transaction?.spreadMonths != null);
+  const [spreadStartMonth, setSpreadStartMonth] = useState(
+    transaction?.spreadStartMonth != null ? yyyymmToMonthInput(transaction.spreadStartMonth) : '',
+  );
+  const [spreadMonths, setSpreadMonths] = useState(
+    transaction?.spreadMonths != null ? String(transaction.spreadMonths) : '12',
+  );
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
   const canBePayment = type === 'INCOME' && selectedAccount?.type === 'CREDIT_CARD';
   const canBeReimbursable = type === 'EXPENSE' && !isTransfer && !isPayment;
+  // reimbursable and spread are mutually exclusive; each surface disables one
+  // while the other is on
+  const canBeSpread = canBeReimbursable;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const suggestFor = (payee: string, note: string): void => {
@@ -117,6 +136,10 @@ export const useTransactionForm = ({
       canBeReimbursable,
       isReimbursable,
       reimbursementExpectedAmount,
+      canBeSpread,
+      isSpread,
+      spreadStartMonth,
+      spreadMonths,
     });
 
     const res = await fetch(
@@ -157,6 +180,13 @@ export const useTransactionForm = ({
     reimbursementExpectedAmount,
     setReimbursementExpectedAmount,
     canBeReimbursable,
+    isSpread,
+    setIsSpread,
+    spreadStartMonth,
+    setSpreadStartMonth,
+    spreadMonths,
+    setSpreadMonths,
+    canBeSpread,
     pending,
     error,
     suggestFor,

@@ -1,3 +1,4 @@
+import { monthOfDate, monthsBetween } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { ReimbursementConflictError, ServiceValidationError } from '@/lib/services/common';
 import {
@@ -6,6 +7,7 @@ import {
   toCents,
   type ReimbursementStatus,
 } from '@/lib/services/reimbursements';
+import { allocateSpread, SPREAD_MAX_START_OFFSET, spreadEndMonth } from '@/lib/spread';
 import type {
   CreateTransactionInput,
   ListTransactionsQuery,
@@ -38,6 +40,11 @@ export type FrontendTransaction = {
   /** this row is the INCOME side of >=1 link: excluded from income aggregates, blocked from delete */
   isReimbursementIncome: boolean;
   reimbursementIncomeLinkedTotal: string;
+  /** first YYYYMM month this expense is spread over for reporting; null when not spread */
+  spreadStartMonth: number | null;
+  spreadMonths: number | null;
+  /** the largest monthly share (remainder cents go to the earliest months); null when not spread */
+  spreadMonthlyAmount: string | null;
 };
 
 export const toFrontend = (tx: {
@@ -56,6 +63,8 @@ export const toFrontend = (tx: {
   isReimbursable: boolean;
   reimbursementExpectedAmount: unknown;
   reimbursementCompletedAt: Date | null;
+  spreadStartMonth?: number | null;
+  spreadMonths?: number | null;
   account: { name: string };
   category: { name: string } | null;
   importBatch: { id: string; filename: string } | null;
@@ -101,8 +110,33 @@ export const toFrontend = (tx: {
     reimbursementCompletedManually: tx.reimbursementCompletedAt !== null,
     isReimbursementIncome: tx.reimbursementIncomeLinks.length > 0,
     reimbursementIncomeLinkedTotal: (incomeLinkedCents / 100).toFixed(2),
+    spreadStartMonth: tx.spreadMonths == null ? null : (tx.spreadStartMonth ?? null),
+    spreadMonths: tx.spreadStartMonth == null ? null : (tx.spreadMonths ?? null),
+    spreadMonthlyAmount:
+      tx.spreadMonths == null || tx.spreadStartMonth == null
+        ? null
+        : (
+            allocateSpread(toCents(tx.amount), tx.spreadStartMonth, tx.spreadMonths)[0].cents / 100
+          ).toFixed(2),
   };
 };
+
+/** The three spread columns, always written together (all set or all null). */
+const spreadColumns = (
+  start: number | null,
+  months: number | null,
+): {
+  spreadStartMonth: number | null;
+  spreadMonths: number | null;
+  spreadEndMonth: number | null;
+} =>
+  start === null || months === null
+    ? { spreadStartMonth: null, spreadMonths: null, spreadEndMonth: null }
+    : {
+        spreadStartMonth: start,
+        spreadMonths: months,
+        spreadEndMonth: spreadEndMonth(start, months),
+      };
 
 export const include = {
   account: { select: { name: true } },
@@ -170,6 +204,7 @@ export const createTransaction = async (
       isTransfer: input.isTransfer,
       isReimbursable: input.isReimbursable,
       reimbursementExpectedAmount: input.isReimbursable ? input.reimbursementExpectedAmount : null,
+      ...spreadColumns(input.spreadStartMonth ?? null, input.spreadMonths ?? null),
     },
     include,
   });
@@ -277,6 +312,36 @@ export const updateTransaction = async (
     throw new ServiceValidationError('Only a reimbursable expense can be marked fully reimbursed');
   }
 
+  // Spread fields travel as a pair (the validator rejects one without the
+  // other), so `spreadMonths` alone says whether the payload touches them.
+  const spreadTouched = input.spreadMonths !== undefined;
+  const resultingSpreadStart = spreadTouched
+    ? (input.spreadStartMonth ?? null)
+    : (existing.spreadStartMonth ?? null);
+  const resultingSpreadMonths = spreadTouched
+    ? (input.spreadMonths ?? null)
+    : (existing.spreadMonths ?? null);
+  if (resultingSpreadMonths !== null && resultingSpreadStart !== null) {
+    if ((input.type ?? existing.type) !== 'EXPENSE') {
+      throw new ServiceValidationError('Only an expense can be spread');
+    }
+    if (resultingIsTransfer || resultingIsPayment) {
+      throw new ServiceValidationError('A transfer or card payment cannot be spread');
+    }
+    if (resultingIsReimbursable) {
+      throw new ServiceValidationError('A reimbursable expense cannot also be spread');
+    }
+    const resultingDate = input.date ?? existing.date;
+    if (
+      Math.abs(monthsBetween(monthOfDate(resultingDate), resultingSpreadStart)) >
+      SPREAD_MAX_START_OFFSET
+    ) {
+      throw new ServiceValidationError(
+        `The spread must start within ${SPREAD_MAX_START_OFFSET} months of the transaction date`,
+      );
+    }
+  }
+
   const transaction = await prisma.transaction.update({
     where: { id: transactionId },
     data: {
@@ -301,6 +366,7 @@ export const updateTransaction = async (
           : input.reimbursementCompleted === false
             ? null
             : undefined,
+      ...(spreadTouched ? spreadColumns(resultingSpreadStart, resultingSpreadMonths) : {}),
     },
     include,
   });

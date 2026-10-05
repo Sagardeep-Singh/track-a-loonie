@@ -229,6 +229,36 @@ describe('importUserData', () => {
     });
   });
 
+  it('restores a spread expense and recomputes its end month rather than trusting the file', async () => {
+    const file = structuredClone(baseFile);
+    Object.assign(file.data.transactions[0], {
+      isTransfer: false,
+      transferMatchId: null,
+      spreadStartMonth: 202607,
+      spreadMonths: 12,
+    });
+
+    await importUserData('user-1', file as never);
+
+    const [txArg] = prismaMock.transaction.createMany.mock.calls[0];
+    expect(txArg.data[0]).toMatchObject({
+      spreadStartMonth: 202607,
+      spreadMonths: 12,
+      spreadEndMonth: 202706,
+    });
+  });
+
+  it('imports a pre-spread export (no spread fields) as not spread', async () => {
+    await importUserData('user-1', baseFile as never);
+
+    const [txArg] = prismaMock.transaction.createMany.mock.calls[0];
+    expect(txArg.data[0]).toMatchObject({
+      spreadStartMonth: null,
+      spreadMonths: null,
+      spreadEndMonth: null,
+    });
+  });
+
   it('regenerates every id and rewrites every FK through the same map', async () => {
     await importUserData('user-1', baseFile as never);
 

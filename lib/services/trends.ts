@@ -1,6 +1,7 @@
 import { monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
+import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 
 export type TrendsRange = 3 | 6 | 12;
 
@@ -87,7 +88,7 @@ export const getSpendingTrends = async (
   // the last month's exclusive upper bound is the next month's first day
   const rangeEndDate = monthRange(allMonths[allMonths.length - 1]).end;
 
-  const [transactions, reimbursedExpenses] = await Promise.all([
+  const [transactions, reimbursedExpenses, spreadShares] = await Promise.all([
     prisma.transaction.findMany({
       where: { userId, date: { gte: rangeStart, lt: rangeEndDate } },
       include: {
@@ -96,6 +97,7 @@ export const getSpendingTrends = async (
       },
     }),
     listReimbursedAmountsByExpenseDate(userId, rangeStart, rangeEndDate),
+    listSpreadSharesInRange(userId, allMonths[0], allMonths[allMonths.length - 1]),
   ]);
 
   // Reimbursed amount per expense — nets out of every expense sum below,
@@ -125,8 +127,10 @@ export const getSpendingTrends = async (
   // static flag).
   const isIncome = (t: (typeof transactions)[number]): boolean =>
     t.type === 'INCOME' && !t.isPayment && !t.isTransfer;
+  // A spread expense counts through its monthly shares (added below), never
+  // through its own date.
   const isExpense = (t: (typeof transactions)[number]): boolean =>
-    t.type === 'EXPENSE' && !t.isTransfer;
+    t.type === 'EXPENSE' && !t.isTransfer && t.spreadMonths == null;
 
   const monthTotals = new Map<number, { income: number; expense: number }>();
   for (const m of allMonths) monthTotals.set(m, { income: 0, expense: 0 });
@@ -135,21 +139,45 @@ export const getSpendingTrends = async (
   const currentMonthSet = new Set(currentMonths);
   let uncategorizedCount = 0;
 
+  const addExpense = (
+    m: number,
+    category: { id: string; name: string } | null,
+    amount: number,
+    countsUncategorized: boolean,
+  ): void => {
+    const bucket = monthTotals.get(m);
+    if (!bucket) return;
+    bucket.expense += amount;
+    const categoryId = category?.id ?? UNCATEGORIZED_ID;
+    categoryNames.set(categoryId, category?.name ?? 'Uncategorized');
+    if (!categoryMonthTotals.has(categoryId)) categoryMonthTotals.set(categoryId, new Map());
+    const perMonth = categoryMonthTotals.get(categoryId)!;
+    perMonth.set(m, (perMonth.get(m) ?? 0) + amount);
+    if (countsUncategorized && categoryId === UNCATEGORIZED_ID && currentMonthSet.has(m)) {
+      uncategorizedCount += 1;
+    }
+  };
+
   for (const t of transactions) {
     const m = monthOf(t.date);
     const bucket = monthTotals.get(m);
     if (!bucket) continue;
     if (isIncome(t)) bucket.income += netIncomeAmount(t);
-    if (isExpense(t)) {
-      const amount = netExpenseAmount(t);
-      bucket.expense += amount;
-      const categoryId = t.category?.id ?? UNCATEGORIZED_ID;
-      categoryNames.set(categoryId, t.category?.name ?? 'Uncategorized');
-      if (!categoryMonthTotals.has(categoryId)) categoryMonthTotals.set(categoryId, new Map());
-      const perMonth = categoryMonthTotals.get(categoryId)!;
-      perMonth.set(m, (perMonth.get(m) ?? 0) + amount);
-      if (categoryId === UNCATEGORIZED_ID && currentMonthSet.has(m)) uncategorizedCount += 1;
-    }
+    if (isExpense(t)) addExpense(m, t.category, netExpenseAmount(t), true);
+  }
+  // one uncategorized spread payment is one transaction to categorize, not
+  // one per month it covers
+  const countedSpreadIds = new Set<string>();
+  for (const share of spreadShares) {
+    const firstInCurrentRange =
+      currentMonthSet.has(share.month) && !countedSpreadIds.has(share.transactionId);
+    if (firstInCurrentRange) countedSpreadIds.add(share.transactionId);
+    addExpense(
+      share.month,
+      share.categoryId ? { id: share.categoryId, name: share.categoryName ?? '' } : null,
+      Number(share.amount),
+      firstInCurrentRange,
+    );
   }
 
   const months: TrendsMonth[] = currentMonths.map((m) => ({

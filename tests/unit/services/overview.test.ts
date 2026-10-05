@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { prismaMock } = vi.hoisted(() => ({
+const { prismaMock, spreadFindMany } = vi.hoisted(() => ({
+  spreadFindMany: vi.fn(),
   prismaMock: {
     budget: { findMany: vi.fn() },
     transaction: { groupBy: vi.fn(), findMany: vi.fn() },
@@ -14,16 +15,21 @@ const { prismaMock } = vi.hoisted(() => ({
 
 // the manually-completed-reimbursement lookup in listReimbursedAmountsByExpenseDate
 // also calls transaction.findMany; route it away so each test's own
-// transaction.findMany mocks (and their call order) stay about the ledger rows
+// transaction.findMany mocks (and their call order) stay about the ledger rows.
+// The spread-window lookup in listSpreadSharesInRange gets its own mock too.
 vi.mock('@/lib/db/prisma', () => ({
   prisma: {
     ...prismaMock,
     transaction: {
       ...prismaMock.transaction,
-      findMany: (args?: { where?: { reimbursementCompletedAt?: unknown } }) =>
+      findMany: (args?: {
+        where?: { reimbursementCompletedAt?: unknown; spreadEndMonth?: unknown };
+      }) =>
         args?.where?.reimbursementCompletedAt
           ? Promise.resolve([])
-          : prismaMock.transaction.findMany(args),
+          : args?.where?.spreadEndMonth
+            ? spreadFindMany(args)
+            : prismaMock.transaction.findMany(args),
     },
   },
 }));
@@ -33,6 +39,7 @@ const { getOverviewData } = await import('@/lib/services/overview');
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
+  spreadFindMany.mockResolvedValue([]);
 });
 
 describe('getOverviewData', () => {
@@ -497,5 +504,97 @@ describe('getOverviewData', () => {
     expect(other.amount).toBe('35.00');
     // Uncategorized spend folded into Other can't be expressed as an id.
     expect(other.categoryIds).toEqual(['cat-7', 'cat-8']);
+  });
+  it('counts spread expenses through their monthly shares, never on their own day', async () => {
+    prismaMock.budget.findMany.mockResolvedValue([]);
+    prismaMock.transaction.groupBy.mockResolvedValue([]);
+    prismaMock.account.findFirst.mockResolvedValue(null);
+    const marchSpread = {
+      id: 'insurance',
+      type: 'EXPENSE',
+      amount: 1200,
+      date: new Date(Date.UTC(2026, 2, 10)),
+      isPayment: false,
+      isTransfer: false,
+      reimbursementIncomeLinks: [],
+      payee: 'Insurer',
+      categoryId: 'cat-ins',
+      category: { name: 'Insurance' },
+      spreadStartMonth: 202601,
+      spreadMonths: 12,
+    };
+    prismaMock.transaction.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'groceries',
+          type: 'EXPENSE',
+          amount: 100,
+          date: new Date(Date.UTC(2026, 2, 5)),
+          isPayment: false,
+          isTransfer: false,
+          reimbursementIncomeLinks: [],
+          payee: 'Store',
+          categoryId: 'cat-groc',
+          category: { name: 'Groceries' },
+          spreadStartMonth: null,
+          spreadMonths: null,
+        },
+        marchSpread,
+      ])
+      .mockResolvedValueOnce([]);
+    // the window query: the March-paid spread plus a June-paid one spread
+    // backward over Jan-Dec, which the month's date query never sees
+    spreadFindMany.mockResolvedValue([
+      marchSpread,
+      {
+        id: 'tax',
+        amount: 3600,
+        date: new Date(Date.UTC(2026, 5, 15)),
+        payee: 'City',
+        categoryId: 'cat-tax',
+        category: { name: 'Property tax' },
+        spreadStartMonth: 202601,
+        spreadMonths: 12,
+      },
+    ]);
+    prismaMock.categoryRule.findMany.mockResolvedValue([]);
+
+    const result = await getOverviewData('user-1', { month: 202603, day: 10 });
+
+    expect(result.hero.expense).toBe('500.00');
+    expect(result.expenseBreakdown.map((s) => [s.categoryName, s.amount])).toEqual([
+      ['Property tax', '300.00'],
+      ['Groceries', '100.00'],
+      ['Insurance', '100.00'],
+    ]);
+    expect(result.dayBars.find((d) => d.day === 10)).toEqual({ day: 10, income: 0, expense: 0 });
+    expect(result.dayBars.find((d) => d.day === 5)?.expense).toBe(100);
+    expect(result.selectedDay.spent).toBe('0.00');
+    expect(result.selectedDay.rows).toEqual([
+      expect.objectContaining({ id: 'insurance', amount: '1200.00', isSpread: true }),
+    ]);
+    expect(result.spreadTotal).toBe('400.00');
+    expect(result.spreadShares).toEqual([
+      {
+        transactionId: 'tax',
+        payee: 'City',
+        categoryName: 'Property tax',
+        amount: '300.00',
+        sourceMonth: 202606,
+        sourceDay: 15,
+      },
+      {
+        transactionId: 'insurance',
+        payee: 'Insurer',
+        categoryName: 'Insurance',
+        amount: '100.00',
+        sourceMonth: 202603,
+        sourceDay: 10,
+      },
+    ]);
+    expect(spreadFindMany.mock.calls[0][0].where).toMatchObject({
+      spreadStartMonth: { lte: 202603 },
+      spreadEndMonth: { gte: 202603 },
+    });
   });
 });

@@ -25,6 +25,10 @@ export const daysInMonth = (month: number): number => {
   return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
 };
 
+/** Signed number of months from `from` to `to` (`YYYYMM` both). */
+export const monthsBetween = (from: number, to: number): number =>
+  Math.floor(to / 100) * 12 + (to % 100) - (Math.floor(from / 100) * 12 + (from % 100));
+
 /** The `YYYYMM` month `delta` months after (or, negative, before) `month`. */
 export const shiftMonth = (month: number, delta: number): number => {
   const year = Math.floor(month / 100);
