@@ -6,6 +6,7 @@ import { ArrowRightLeft, Check, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
 import { Modal } from '@/components/ui/modal';
+import { BudgetRing } from '@/components/budgets/budget-ring';
 import { deleteJSON, getJSON, patchJSON, postJSON, putJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { monthLabel } from '@/lib/period-selection';
@@ -18,6 +19,18 @@ const withoutKey = (record: Record<string, string>, key: string): Record<string,
   const next = { ...record };
   delete next[key];
   return next;
+};
+
+/**
+ * How much of what the category had to spend this month (carried in plus
+ * assigned) its activity used, matching what the Overview rings show. Spending
+ * with nothing funded reads as fully over.
+ */
+const spentFraction = (category: FrontendZbbCategory): number => {
+  const funded = Number(category.carriedIn) + Number(category.assigned);
+  const spent = Math.max(Number(category.activity), 0);
+  if (funded <= 0) return spent > 0 ? 2 : 0;
+  return spent / funded;
 };
 
 type MoveDraft = { fromCategoryId: string; toCategoryId: string; amount: string };
@@ -267,24 +280,29 @@ export const ZeroBasedView = ({
                     overspent && 'bg-rose-soft/40',
                   )}
                 >
-                  <div className="min-w-0">
-                    <div className="font-display truncate text-[15px] font-semibold">
-                      {c.categoryName}
-                    </div>
-                    <div className="text-ink-muted flex flex-wrap items-center gap-x-1.5 font-mono text-[11.5px] tabular-nums">
-                      {Number(c.carriedIn) !== 0 && <span>{money(c.carriedIn)} carried in ·</span>}
-                      <button
-                        type="button"
-                        onClick={() => openTarget(c)}
-                        className="hover:text-iris inline-flex items-center gap-1"
-                        aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
-                      >
-                        <Target size={12} />
-                        {c.target === null ? 'Set target' : `target ${money(c.target)}`}
-                      </button>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <BudgetRing fraction={spentFraction(c)} size={36} />
+                    <div className="min-w-0">
+                      <div className="font-display truncate text-[15px] font-semibold">
+                        {c.categoryName}
+                      </div>
+                      <div className="text-ink-muted flex flex-wrap items-center gap-x-1.5 font-mono text-[11.5px] tabular-nums">
+                        {Number(c.carriedIn) !== 0 && (
+                          <span>{money(c.carriedIn)} carried in ·</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openTarget(c)}
+                          className="hover:text-iris inline-flex items-center gap-1 whitespace-nowrap"
+                          aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
+                        >
+                          <Target size={12} />
+                          {c.target === null ? 'Set target' : `target ${money(c.target)}`}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 sm:col-start-auto sm:row-start-auto">
+                  <div className="col-start-2 row-start-1 flex w-24 items-center justify-end gap-1 justify-self-end sm:col-start-auto sm:row-start-auto sm:w-auto">
                     <label htmlFor={`assigned-${c.categoryId}`} className="sr-only">
                       Assigned to {c.categoryName}
                     </label>
