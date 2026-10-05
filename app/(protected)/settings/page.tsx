@@ -6,10 +6,20 @@ import { userHasPassword } from '@/lib/services/users';
 import { getReminderPreference } from '@/lib/services/reminders';
 import { listPushSubscriptions } from '@/lib/services/pushSubscriptions';
 import { getAiSettings, listAiModels } from '@/lib/services/aiSettings';
+import { getBudgetSettings } from '@/lib/services/zeroBased';
+import { listAccounts } from '@/lib/services/accounts';
 
 const SettingsPage = async (): Promise<React.ReactElement> => {
   const session = await getServerAuthSession();
-  const [hasPassword, reminderPreference, pushDevices, aiSettings, aiModels] = await Promise.all([
+  const [
+    hasPassword,
+    reminderPreference,
+    pushDevices,
+    aiSettings,
+    aiModels,
+    budgetSettings,
+    accounts,
+  ] = await Promise.all([
     userHasPassword(session!.user.id),
     getReminderPreference(session!.user.id),
     listPushSubscriptions(session!.user.id),
@@ -19,6 +29,8 @@ const SettingsPage = async (): Promise<React.ReactElement> => {
     // so a provider outage cannot take password change, reminders, export and
     // import down with it.
     listAiModels(session!.user.id),
+    getBudgetSettings(session!.user.id),
+    listAccounts(session!.user.id),
   ]);
 
   return (
@@ -35,6 +47,8 @@ const SettingsPage = async (): Promise<React.ReactElement> => {
         pushDevices={pushDevices}
         aiSettings={aiSettings}
         aiModels={aiModels}
+        budgetSettings={budgetSettings}
+        accounts={accounts}
       />
       <SourceLink className="mt-12 text-center" />
     </div>

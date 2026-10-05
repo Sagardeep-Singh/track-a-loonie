@@ -105,6 +105,20 @@ describe('findOrCreateGoogleUser', () => {
     expect(prismaMock.account.create).not.toHaveBeenCalled();
   });
 
+  it('looks up and creates by the normalized address', async () => {
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.user.create.mockResolvedValue({ id: 'user-2' });
+
+    await findOrCreateGoogleUser(' Jane@Example.COM ', 'Jane');
+
+    expect(prismaMock.user.findUnique).toHaveBeenCalledWith({
+      where: { email: 'jane@example.com' },
+    });
+    expect(prismaMock.user.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ email: 'jane@example.com' }),
+    });
+  });
+
   it('marks an existing unverified user verified — a live Google sign-in vouches for the address', async () => {
     prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', emailVerified: null });
 

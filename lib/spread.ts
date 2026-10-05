@@ -1,4 +1,4 @@
-import { addMonths } from '@/lib/date';
+import { shiftMonth } from '@/lib/date';
 
 /**
  * Pure helpers for spreading one EXPENSE across several months for reporting.
@@ -14,7 +14,7 @@ export type SpreadShare = { month: number; cents: number };
 
 /** Last `YYYYMM` month covered by a spread starting at `start` for `months` months. */
 export const spreadEndMonth = (start: number, months: number): number =>
-  addMonths(start, months - 1);
+  shiftMonth(start, months - 1);
 
 /**
  * Splits `amountCents` evenly over `months` months from `start`. The first
@@ -29,7 +29,7 @@ export const allocateSpread = (
   const base = Math.floor(amountCents / months);
   const remainder = amountCents - base * months;
   return Array.from({ length: months }, (_, i) => ({
-    month: addMonths(start, i),
+    month: shiftMonth(start, i),
     cents: base + (i < remainder ? 1 : 0),
   }));
 };

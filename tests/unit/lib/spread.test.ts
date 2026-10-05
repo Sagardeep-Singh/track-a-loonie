@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { addMonths, monthOfDate, monthsBetween } from '@/lib/date';
+import { shiftMonth, monthOfDate, monthsBetween } from '@/lib/date';
 import { allocateSpread, spreadEndMonth } from '@/lib/spread';
 import { formatSpreadMonth, spreadPreview } from '@/lib/transactions/spread-preview';
 import { monthInputToYyyymm, yyyymmToMonthInput } from '@/lib/transactions/transaction-payload';
 
-describe('addMonths', () => {
+describe('shiftMonth', () => {
   it('moves within a year', () => {
-    expect(addMonths(202603, 2)).toBe(202605);
+    expect(shiftMonth(202603, 2)).toBe(202605);
   });
 
   it('crosses a year boundary forward and backward', () => {
-    expect(addMonths(202611, 3)).toBe(202702);
-    expect(addMonths(202602, -3)).toBe(202511);
-    expect(addMonths(202601, -1)).toBe(202512);
+    expect(shiftMonth(202611, 3)).toBe(202702);
+    expect(shiftMonth(202602, -3)).toBe(202511);
+    expect(shiftMonth(202601, -1)).toBe(202512);
   });
 
   it('is a no-op for zero and handles multi-year jumps', () => {
-    expect(addMonths(202606, 0)).toBe(202606);
-    expect(addMonths(202606, 24)).toBe(202806);
-    expect(addMonths(202606, -24)).toBe(202406);
+    expect(shiftMonth(202606, 0)).toBe(202606);
+    expect(shiftMonth(202606, 24)).toBe(202806);
+    expect(shiftMonth(202606, -24)).toBe(202406);
   });
 });
 

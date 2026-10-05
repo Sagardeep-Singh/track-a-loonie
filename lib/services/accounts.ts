@@ -12,6 +12,8 @@ export type FrontendAccount = {
   balance: string;
   createdAt: string;
   statementDay: number | null;
+  /** zero-based budgeting only: whether the balance feeds Ready to Assign */
+  onBudget: boolean;
   transactionCount: number;
   lastImportAt: string | null;
 };
@@ -23,6 +25,7 @@ const toFrontendAccount = (account: {
   startingBalance: unknown;
   createdAt: Date;
   statementDay: number | null;
+  onBudget: boolean;
   transactions: { amount: unknown; type: string }[];
   importBatches: { createdAt: Date }[];
 }): FrontendAccount => {
@@ -44,6 +47,7 @@ const toFrontendAccount = (account: {
     createdAt: account.createdAt.toISOString(),
     balance: (starting + net).toFixed(2),
     statementDay: account.statementDay,
+    onBudget: account.onBudget,
     transactionCount: account.transactions.length,
     lastImportAt: lastImportAt?.toISOString() ?? null,
   };
@@ -72,6 +76,8 @@ export const createAccount = async (
       type: input.type,
       startingBalance: input.startingBalance,
       statementDay: input.type === 'CREDIT_CARD' ? (input.statementDay ?? null) : null,
+      // savings is long-term money: off-budget unless the user says otherwise
+      onBudget: input.onBudget ?? input.type !== 'SAVINGS',
     },
     include: {
       transactions: { select: { amount: true, type: true } },

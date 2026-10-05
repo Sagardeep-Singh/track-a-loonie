@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
 import { Prisma } from '@prisma/client';
 import type { SignUpInput } from '@/lib/validators/signup';
+import { normalizeEmail } from '@/lib/validators/email';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -63,9 +64,10 @@ export const userHasPassword = async (userId: string): Promise<boolean> => {
  * password-less account on first sign-in.
  */
 export const findOrCreateGoogleUser = async (
-  email: string,
+  rawEmail: string,
   name: string | null,
 ): Promise<{ id: string }> => {
+  const email = normalizeEmail(rawEmail);
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     // A live Google sign-in vouches for the address just as well as our own

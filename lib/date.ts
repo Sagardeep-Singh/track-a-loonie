@@ -25,16 +25,17 @@ export const daysInMonth = (month: number): number => {
   return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
 };
 
-/** `YYYYMM` month `n` months after `month` (negative `n` goes back). */
-export const addMonths = (month: number, n: number): number => {
-  const index = Math.floor(month / 100) * 12 + (month % 100) - 1 + n;
-  return Math.floor(index / 12) * 100 + (((index % 12) + 12) % 12) + 1;
-};
-
 /** Signed number of months from `from` to `to` (`YYYYMM` both). */
 export const monthsBetween = (from: number, to: number): number =>
   Math.floor(to / 100) * 12 + (to % 100) - (Math.floor(from / 100) * 12 + (from % 100));
 
-/** `YYYYMM` month a UTC-midnight transaction date falls in. */
+/** The `YYYYMM` month `delta` months after (or, negative, before) `month`. */
+export const shiftMonth = (month: number, delta: number): number => {
+  const year = Math.floor(month / 100);
+  const date = new Date(Date.UTC(year, (month % 100) - 1 + delta, 1));
+  return date.getUTCFullYear() * 100 + (date.getUTCMonth() + 1);
+};
+
+/** `YYYYMM` of the UTC month `date` falls in. */
 export const monthOfDate = (date: Date): number =>
   date.getUTCFullYear() * 100 + (date.getUTCMonth() + 1);

@@ -85,7 +85,7 @@ describe('userDataFileSchema', () => {
 
   it('rejects a different format version', () => {
     const file = validFile() as { formatVersion: number };
-    file.formatVersion = 2;
+    file.formatVersion = 3;
     const result = userDataFileSchema.safeParse(file);
     expect(result.success).toBe(false);
     expect(result.error?.issues[0].message).toBe(
@@ -352,5 +352,39 @@ describe('userDataFileSchema', () => {
           .success,
       ).toBe(false);
     });
+  });
+});
+
+describe('userDataFileSchema zero-based fields', () => {
+  const withZbb = (): Record<string, unknown> & { data: Record<string, unknown> } => {
+    const file = validFile() as Record<string, unknown> & { data: Record<string, unknown> };
+    file.data.categoryAssignments = [
+      { id: 'a-1', categoryId: 'cat-1', month: 202601, amount: '-25.00' },
+    ];
+    file.data.budgetSettings = { mode: 'ZERO_BASED', zbbStartMonth: 202601 };
+    return file;
+  };
+
+  it('still accepts a v1 file without the zero-based fields', () => {
+    const file = validFile() as { formatVersion: number };
+    file.formatVersion = 1;
+    expect(userDataFileSchema.safeParse(file).success).toBe(true);
+  });
+
+  it('accepts assignments (negative allowed) and budget settings', () => {
+    expect(userDataFileSchema.safeParse(withZbb()).success).toBe(true);
+  });
+
+  it('rejects an assignment pointing at an unknown category', () => {
+    const file = withZbb();
+    (file.data.categoryAssignments as { categoryId: string }[])[0].categoryId = 'nope';
+    expect(userDataFileSchema.safeParse(file).success).toBe(false);
+  });
+
+  it('rejects two assignments for the same category and month', () => {
+    const file = withZbb();
+    const rows = file.data.categoryAssignments as { id: string }[];
+    rows.push({ ...rows[0], id: 'a-2' });
+    expect(userDataFileSchema.safeParse(file).success).toBe(false);
   });
 });
