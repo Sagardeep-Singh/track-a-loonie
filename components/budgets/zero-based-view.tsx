@@ -271,6 +271,14 @@ export const ZeroBasedView = ({
             {categories.map((c) => {
               const available = Number(c.available);
               const overspent = available < 0;
+              const pillClass = cn(
+                'rounded-full px-2.5 py-0.5 font-mono text-[13px] font-semibold tabular-nums',
+                overspent
+                  ? 'bg-rose-soft text-rose'
+                  : available > 0
+                    ? 'bg-sky-soft text-sky'
+                    : 'bg-paper-sunk text-ink-muted',
+              );
               return (
                 <li
                   key={c.categoryId}
@@ -337,16 +345,23 @@ export const ZeroBasedView = ({
                       {/* no column headers on mobile, and Left matches Assigned
                           until something is spent or carried in */}
                       <span className="text-ink-muted font-mono text-[13px] sm:hidden">Left</span>
+                      {/* Mobile: the pill is the Move/Cover button, which keeps the
+                          row short. Desktop keeps a plain pill plus its own column. */}
+                      <button
+                        type="button"
+                        onClick={() => openMove(c)}
+                        aria-label={`${overspent ? 'Cover' : 'Move money from'} ${c.categoryName}, ${money(c.available)} left`}
+                        className={cn(
+                          pillClass,
+                          'relative inline-flex items-center gap-1.5 after:absolute after:-inset-2 sm:hidden',
+                        )}
+                      >
+                        {money(c.available)}
+                        <ArrowRightLeft size={13} aria-hidden="true" />
+                      </button>
                       <span
                         data-testid="zbb-available"
-                        className={cn(
-                          'justify-self-end rounded-full px-2.5 py-0.5 font-mono text-[13px] font-semibold tabular-nums',
-                          overspent
-                            ? 'bg-rose-soft text-rose'
-                            : available > 0
-                              ? 'bg-sky-soft text-sky'
-                              : 'bg-paper-sunk text-ink-muted',
-                        )}
+                        className={cn(pillClass, 'hidden justify-self-end sm:inline-block')}
                       >
                         {money(c.available)}
                       </span>
@@ -354,7 +369,7 @@ export const ZeroBasedView = ({
                         type="button"
                         onClick={() => openMove(c)}
                         className={cn(
-                          'inline-flex items-center justify-end gap-1 text-xs',
+                          'hidden items-center justify-end gap-1 text-xs sm:inline-flex',
                           overspent ? 'text-rose font-semibold' : 'text-ink-muted hover:text-iris',
                         )}
                       >
