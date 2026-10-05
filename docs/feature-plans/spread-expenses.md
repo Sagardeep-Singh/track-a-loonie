@@ -182,6 +182,9 @@ Implementation notes that differ slightly from the design above:
   can import them).
 - `transactionsPage.ts` needed no change: its `include` already returns the new scalars.
 - Trends counts an uncategorized spread payment once, not once per month it covers.
+- Zero-based budgeting (merged from main after this plan) keeps spread expenses on their
+  payment month: its Ready to Assign comes from real account balances, so deferring activity
+  would unbalance it. Limits-mode budgets, Overview totals and Trends still use the shares.
 
 ## Non-goals (this iteration)
 
