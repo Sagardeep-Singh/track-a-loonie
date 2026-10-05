@@ -28,7 +28,8 @@ vi.mock('@/lib/services/rateLimit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/services/rateLimit')>()),
   checkRateLimit: checkRateLimitMock,
 }));
-vi.mock('@/lib/email/brevo', () => ({
+vi.mock('@/lib/email/brevo', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/email/brevo')>()),
   sendEmail: sendEmailMock,
   isEmailConfigured: isEmailConfiguredMock,
 }));
@@ -37,16 +38,28 @@ const { requestPasswordReset, getPasswordResetTokenStatus, resetPassword } =
   await import('@/lib/services/passwordReset');
 const { RateLimitedError } = await import('@/lib/services/rateLimit');
 const { ServiceValidationError } = await import('@/lib/services/common');
+const { EmailSendError } = await import('@/lib/email/brevo');
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
 const HOUR_MS = 60 * 60 * 1000;
 
+const logSpies = {
+  info: vi.spyOn(console, 'info').mockImplementation(() => {}),
+  warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+  error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+};
+
+const allLogs = (): string =>
+  Object.values(logSpies)
+    .flatMap((spy) => spy.mock.calls.flat())
+    .join('\n');
+
 beforeEach(() => {
   vi.clearAllMocks();
   isEmailConfiguredMock.mockReturnValue(true);
   checkRateLimitMock.mockResolvedValue(undefined);
-  sendEmailMock.mockResolvedValue(undefined);
+  sendEmailMock.mockResolvedValue({ messageId: '<msg-1@brevo>' });
   bcryptHashMock.mockResolvedValue('new-hash');
   prismaMock.$transaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
 });
@@ -249,5 +262,127 @@ describe('resetPassword', () => {
     );
 
     await expect(resetPassword(input)).rejects.toThrow(ServiceValidationError);
+  });
+});
+
+describe('logging', () => {
+  const passwordUser = { id: 'user-1', email: 'secret@b.com', passwordHash: 'old-hash' };
+
+  it('logs a skip when email is not configured', async () => {
+    isEmailConfiguredMock.mockReturnValue(false);
+
+    await requestPasswordReset('secret@b.com');
+
+    expect(logSpies.warn).toHaveBeenCalledWith(
+      '[password-reset] request.skipped reason=email-not-configured',
+    );
+  });
+
+  it('logs a per-address rate-limit skip with the retry time', async () => {
+    checkRateLimitMock.mockRejectedValue(new RateLimitedError(90_000));
+
+    await requestPasswordReset('secret@b.com');
+
+    expect(logSpies.warn).toHaveBeenCalledWith(
+      '[password-reset] request.skipped reason=per-address-rate-limit retryAfterSec=90',
+    );
+  });
+
+  it('logs an unknown address without the address', async () => {
+    prismaMock.user.findUnique.mockResolvedValue(null);
+
+    await requestPasswordReset('secret@b.com');
+
+    expect(logSpies.info).toHaveBeenCalledWith('[password-reset] request.no-account');
+    expect(allLogs()).not.toContain('secret@b.com');
+  });
+
+  it('logs the Google-only branch and the notice send', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ ...passwordUser, passwordHash: null });
+
+    await requestPasswordReset('secret@b.com');
+
+    expect(logSpies.info).toHaveBeenCalledWith(
+      '[password-reset] request.google-only userId=user-1',
+    );
+    expect(logSpies.info).toHaveBeenCalledWith(
+      '[password-reset] email.sent kind=google-notice userId=user-1 messageId=<msg-1@brevo>',
+    );
+  });
+
+  it('logs the issued token by hash prefix and the send, never the raw token or address', async () => {
+    prismaMock.user.findUnique.mockResolvedValue(passwordUser);
+
+    await requestPasswordReset('secret@b.com');
+
+    const { tokenHash } = prismaMock.passwordResetToken.upsert.mock.calls[0]![0].create;
+    const rawToken = sendEmailMock.mock.calls[0]![0].text.match(/token=([a-f0-9]+)/)![1];
+    const ref = tokenHash.slice(0, 12);
+    expect(logSpies.info).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(
+          `^\\[password-reset\\] token\\.issued userId=user-1 tokenRef=${ref} expiresAt=\\S+ appUrl=\\S+$`,
+        ),
+      ),
+    );
+    expect(logSpies.info).toHaveBeenCalledWith(
+      `[password-reset] email.sent kind=reset userId=user-1 tokenRef=${ref} messageId=<msg-1@brevo>`,
+    );
+    expect(allLogs()).not.toContain(rawToken);
+    expect(allLogs()).not.toContain(tokenHash);
+    expect(allLogs()).not.toContain('secret@b.com');
+  });
+
+  it('logs a Brevo failure with its status but not the address', async () => {
+    prismaMock.user.findUnique.mockResolvedValue(passwordUser);
+    sendEmailMock.mockRejectedValue(new EmailSendError('brevo responded 401'));
+
+    await expect(requestPasswordReset('secret@b.com')).rejects.toThrow(EmailSendError);
+
+    expect(logSpies.error).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[password-reset\] email\.failed kind=reset userId=user-1 tokenRef=[a-f0-9]{12} error=EmailSendError reason=Failed to send email: brevo responded 401$/,
+      ),
+    );
+    expect(allLogs()).not.toContain('secret@b.com');
+  });
+
+  it('logs token checks with their status', async () => {
+    prismaMock.passwordResetToken.findUnique.mockResolvedValueOnce(null);
+    await getPasswordResetTokenStatus('raw');
+    expect(logSpies.warn).toHaveBeenCalledWith(
+      `[password-reset] token.checked status=invalid tokenRef=${sha256('raw').slice(0, 12)}`,
+    );
+
+    prismaMock.passwordResetToken.findUnique.mockResolvedValueOnce({
+      userId: 'user-1',
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    await getPasswordResetTokenStatus('raw');
+    expect(logSpies.warn).toHaveBeenCalledWith(
+      expect.stringContaining('token.checked status=expired userId=user-1'),
+    );
+  });
+
+  it('logs rejected and completed resets', async () => {
+    const input = { token: 'raw', newPassword: 'a-long-enough-password' };
+    const ref = sha256('raw').slice(0, 12);
+
+    prismaMock.passwordResetToken.findUnique.mockResolvedValueOnce(null);
+    await expect(resetPassword(input)).rejects.toThrow(ServiceValidationError);
+    expect(logSpies.warn).toHaveBeenCalledWith(
+      `[password-reset] reset.rejected reason=invalid tokenRef=${ref}`,
+    );
+
+    prismaMock.passwordResetToken.findUnique.mockResolvedValueOnce({
+      userId: 'user-1',
+      expiresAt: new Date(Date.now() + HOUR_MS),
+      user: { emailVerified: null },
+    });
+    await resetPassword(input);
+    expect(logSpies.info).toHaveBeenCalledWith(
+      `[password-reset] reset.completed userId=user-1 tokenRef=${ref} emailVerified=now`,
+    );
+    expect(allLogs()).not.toContain('a-long-enough-password');
   });
 });

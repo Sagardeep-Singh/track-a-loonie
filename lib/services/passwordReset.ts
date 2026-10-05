@@ -2,7 +2,12 @@ import { randomBytes, createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/prisma';
-import { isEmailConfigured, sendEmail } from '@/lib/email/brevo';
+import {
+  EmailSendError,
+  EmailUnavailableError,
+  isEmailConfigured,
+  sendEmail,
+} from '@/lib/email/brevo';
 import { buildPasswordResetEmail } from '@/lib/email/password-reset-email';
 import { buildPasswordResetGoogleEmail } from '@/lib/email/password-reset-google-email';
 import { appBaseUrl } from '@/lib/http/appUrl';
@@ -27,6 +32,53 @@ const isRecordNotFound = (error: unknown): boolean =>
 
 const hashToken = (rawToken: string): string => createHash('sha256').update(rawToken).digest('hex');
 
+/**
+ * Short, non-reversible handle for a token in logs: the first 12 hex chars of
+ * the stored `tokenHash`, so a log line can be matched to its DB row
+ * (`WHERE "tokenHash" LIKE '<ref>%'`) without the raw token ever being logged.
+ */
+const tokenRef = (tokenHash: string): string => tokenHash.slice(0, 12);
+
+type LogFields = Record<string, string | number | undefined>;
+
+/**
+ * One line per outcome, `[password-reset] <event> key=value ...`, so a
+ * missing email can be traced through every branch. Never pass the email
+ * address, the raw token or a raw error message (Prisma's can echo query
+ * arguments): user ids, token refs, error names and codes only.
+ */
+const log = (level: 'info' | 'warn' | 'error', event: string, fields: LogFields = {}): void => {
+  const details = Object.entries(fields)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(' ');
+  console[level](`[password-reset] ${event}${details ? ` ${details}` : ''}`);
+};
+
+/** Brevo's own errors carry only a status or "network", never the recipient, so their message is safe to log. */
+const describeSendError = (error: unknown): LogFields => ({
+  error: error instanceof Error ? error.name : 'unknown',
+  reason:
+    error instanceof EmailSendError || error instanceof EmailUnavailableError
+      ? error.message
+      : undefined,
+});
+
+const sendLogged = async (
+  kind: 'reset' | 'google-notice',
+  userId: string,
+  params: Parameters<typeof sendEmail>[0],
+  extra: LogFields = {},
+): Promise<void> => {
+  try {
+    const { messageId } = await sendEmail(params);
+    log('info', 'email.sent', { kind, userId, ...extra, messageId: messageId ?? 'none' });
+  } catch (error) {
+    log('error', 'email.failed', { kind, userId, ...extra, ...describeSendError(error) });
+    throw error;
+  }
+};
+
 const resetUrl = (rawToken: string): string => `${appBaseUrl()}/reset-password?token=${rawToken}`;
 
 export const isPasswordResetConfigured = (): boolean => isEmailConfigured();
@@ -44,6 +96,7 @@ export const isPasswordResetConfigured = (): boolean => isEmailConfigured();
  */
 export const requestPasswordReset = async (email: string): Promise<void> => {
   if (!isPasswordResetConfigured()) {
+    log('warn', 'request.skipped', { reason: 'email-not-configured' });
     return;
   }
 
@@ -56,7 +109,10 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     );
   } catch (error) {
     if (error instanceof RateLimitedError) {
-      console.warn('[password-reset] per-address limit hit, email skipped');
+      log('warn', 'request.skipped', {
+        reason: 'per-address-rate-limit',
+        retryAfterSec: Math.ceil(error.retryAfterMs / 1000),
+      });
       return;
     }
     throw error;
@@ -67,11 +123,15 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     select: { id: true, email: true, passwordHash: true },
   });
   if (!user) {
+    // Exact-match lookup, same as sign-in: a case difference from the
+    // address used at signup lands here too.
+    log('info', 'request.no-account');
     return;
   }
 
   if (!user.passwordHash) {
-    await sendEmail({
+    log('info', 'request.google-only', { userId: user.id });
+    await sendLogged('google-notice', user.id, {
       to: user.email,
       ...buildPasswordResetGoogleEmail({ appUrl: appBaseUrl(), loginUrl: `${appBaseUrl()}/login` }),
     });
@@ -87,15 +147,27 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     create: { userId: user.id, tokenHash, expiresAt },
     update: { tokenHash, expiresAt, createdAt: new Date() },
   });
-
-  await sendEmail({
-    to: user.email,
-    ...buildPasswordResetEmail({
-      appUrl: appBaseUrl(),
-      resetUrl: resetUrl(rawToken),
-      minutesValid: TOKEN_TTL_MS / (60 * 1000),
-    }),
+  const ref = tokenRef(tokenHash);
+  log('info', 'token.issued', {
+    userId: user.id,
+    tokenRef: ref,
+    expiresAt: expiresAt.toISOString(),
+    appUrl: appBaseUrl(),
   });
+
+  await sendLogged(
+    'reset',
+    user.id,
+    {
+      to: user.email,
+      ...buildPasswordResetEmail({
+        appUrl: appBaseUrl(),
+        resetUrl: resetUrl(rawToken),
+        minutesValid: TOKEN_TTL_MS / (60 * 1000),
+      }),
+    },
+    { tokenRef: ref },
+  );
 };
 
 export type PasswordResetTokenStatus = 'valid' | 'invalid' | 'expired';
@@ -104,14 +176,23 @@ export type PasswordResetTokenStatus = 'valid' | 'invalid' | 'expired';
 export const getPasswordResetTokenStatus = async (
   rawToken: string,
 ): Promise<PasswordResetTokenStatus> => {
+  const tokenHash = hashToken(rawToken);
   const token = await prisma.passwordResetToken.findUnique({
-    where: { tokenHash: hashToken(rawToken) },
-    select: { expiresAt: true },
+    where: { tokenHash },
+    select: { userId: true, expiresAt: true },
   });
   if (!token) {
+    log('warn', 'token.checked', { status: 'invalid', tokenRef: tokenRef(tokenHash) });
     return 'invalid';
   }
-  return token.expiresAt.getTime() < Date.now() ? 'expired' : 'valid';
+  const status = token.expiresAt.getTime() < Date.now() ? 'expired' : 'valid';
+  log(status === 'valid' ? 'info' : 'warn', 'token.checked', {
+    status,
+    userId: token.userId,
+    tokenRef: tokenRef(tokenHash),
+    expiresAt: token.expiresAt.toISOString(),
+  });
+  return status;
 };
 
 /**
@@ -124,15 +205,19 @@ export const getPasswordResetTokenStatus = async (
  * to revoke, same caveat as `changePassword`.
  */
 export const resetPassword = async (input: ResetPasswordInput): Promise<{ ok: true }> => {
+  const tokenHash = hashToken(input.token);
+  const ref = tokenRef(tokenHash);
   const token = await prisma.passwordResetToken.findUnique({
-    where: { tokenHash: hashToken(input.token) },
+    where: { tokenHash },
     select: { userId: true, expiresAt: true, user: { select: { emailVerified: true } } },
   });
   if (!token) {
+    log('warn', 'reset.rejected', { reason: 'invalid', tokenRef: ref });
     throw new ServiceValidationError(INVALID_LINK_MESSAGE);
   }
   if (token.expiresAt.getTime() < Date.now()) {
     await prisma.passwordResetToken.delete({ where: { userId: token.userId } });
+    log('warn', 'reset.rejected', { reason: 'expired', userId: token.userId, tokenRef: ref });
     throw new ServiceValidationError(EXPIRED_LINK_MESSAGE);
   }
 
@@ -143,7 +228,7 @@ export const resetPassword = async (input: ResetPasswordInput): Promise<{ ok: tr
   // delete finds no row and rolls its password update back.
   try {
     await prisma.$transaction([
-      prisma.passwordResetToken.delete({ where: { tokenHash: hashToken(input.token) } }),
+      prisma.passwordResetToken.delete({ where: { tokenHash } }),
       prisma.user.update({
         where: { id: token.userId },
         data: {
@@ -154,10 +239,20 @@ export const resetPassword = async (input: ResetPasswordInput): Promise<{ ok: tr
     ]);
   } catch (error) {
     if (isRecordNotFound(error)) {
+      log('warn', 'reset.rejected', {
+        reason: 'used-concurrently',
+        userId: token.userId,
+        tokenRef: ref,
+      });
       throw new ServiceValidationError(INVALID_LINK_MESSAGE);
     }
     throw error;
   }
 
+  log('info', 'reset.completed', {
+    userId: token.userId,
+    tokenRef: ref,
+    emailVerified: token.user.emailVerified ? 'already' : 'now',
+  });
   return { ok: true };
 };

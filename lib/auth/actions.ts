@@ -154,6 +154,7 @@ export const requestPasswordResetAction = async (
       );
     } catch (error) {
       if (error instanceof RateLimitedError) {
+        console.warn('[password-reset] request.rejected reason=ip-rate-limit');
         return TOO_MANY_ATTEMPTS;
       }
       throw error;

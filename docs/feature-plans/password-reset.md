@@ -22,6 +22,16 @@ Let a signed-out user who forgot their password set a new one through an emailed
 - Setting a first password for Google-only users.
 - Rate limiting attempts on the reset page itself (a 256-bit token isn't guessable).
 
+## Logging
+
+Every branch logs one `[password-reset] <event> key=value` line so a missing email can be traced. Fields are user ids, `tokenRef` (first 12 hex chars of the stored `tokenHash`, so `WHERE "tokenHash" LIKE '<ref>%'` finds the row), Brevo `messageId`, and error names/codes. Never the address, the raw token, or a raw error message.
+
+- Request: `request.rejected reason=ip-rate-limit`, `request.skipped reason=email-not-configured|per-address-rate-limit`, `request.no-account`, `request.google-only`, `token.issued`, `request failed: <name> <code>` (action catch).
+- Send: `email.sent kind=reset|google-notice messageId=…`, `email.failed … error=… reason=…`.
+- Reset page and submit: `token.checked status=valid|invalid|expired`, `reset.rejected reason=invalid|expired|used-concurrently`, `reset.completed`.
+
+`info` lines go to stdout and `warn`/`error` to stderr.
+
 ## Schema
 
 New `PasswordResetToken` model (same shape as `EmailVerificationToken`) + migration `add_password_reset_token`.
@@ -78,3 +88,4 @@ New `PasswordResetToken` model (same shape as `EmailVerificationToken`) + migrat
 - [x] Unit tests
 - [x] E2E spec
 - [x] format:fix, lint, unit tests, e2e
+- [x] Debug logging on the request, send and reset paths
