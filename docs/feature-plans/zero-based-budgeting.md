@@ -294,6 +294,29 @@ E2E (`tests/e2e/zero-based-budgeting.spec.ts`, Playwright):
 - `lib/date.ts` gained `shiftMonth` and `monthOfDate`. `trends.ts` keeps its private copy of
   `shiftMonth` to avoid an unrelated refactor.
 
+## Zero-based Overview
+
+In zero-based mode (for months from the start month on) the Overview swaps the limits hero and
+budget rings for zero-based cards. Cash flow, the spending pie, by-day bars, the day panel, the
+categorize queue and the card cycle stay as they are.
+
+- **Hero:** Ready to Assign with its state (all assigned, ready to assign, over-assigned),
+  overspent total, and this month's income, assigned, spent and total available. Notes money
+  already set aside for next month.
+- **What to do next:** up to five ranked suggestions with an action link: over-assigned,
+  overspent (naming the smallest healthy category that can cover it, so savings aren't the
+  first suggestion), uncategorized spending, categories on pace to run out before month end
+  (current month only), targets that can or can't be funded, and idle money pointed at next
+  month. Falls back to "Every dollar has a job".
+- **Where your money is:** stacked bar of positive category balances (top five, then a bucket)
+  plus Ready to Assign.
+- **Categories:** overspent first, then running low (with the projected empty date), below
+  target, on track. Each shows spent of funded.
+
+Rules live in `lib/budgets/zero-based-insights.ts` (pure, unit-tested); `getZbbOverview` in
+`lib/services/zeroBased.ts` feeds them. The earlier mapping of zero-based numbers onto the
+limits budget rings (`listBudgetsForMode`) was removed, since the new cards replace them.
+
 ## Follow-ups
 
 - A "save X per month" target type. Today's targets top a category up _to_ an amount, which

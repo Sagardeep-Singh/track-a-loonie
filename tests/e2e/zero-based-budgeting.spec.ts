@@ -76,6 +76,14 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
   // spending already assigned money leaves Ready to Assign at zero
   await expect(ready).toContainText('$0.00');
 
+  await page.goto('/dashboard');
+  await expect(
+    page.getByTestId('zbb-suggestion-overspent').filter({ visible: true }),
+  ).toContainText('Groceries is overspent by $100.00');
+  await expect(
+    page.getByTestId('zbb-suggestion-overspent').filter({ visible: true }),
+  ).toContainText('Cover it from Fun');
+  await page.goto('/budgets');
   await row(page, 'Groceries').getByRole('button', { name: 'Cover' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('From').selectOption({ label: 'Fun ($500.00)' });
@@ -83,6 +91,16 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
   await dialog.getByRole('button', { name: 'Move money' }).click();
   await expect(row(page, 'Groceries').getByTestId('zbb-available')).toHaveText('$0.00');
   await expect(row(page, 'Fun').getByTestId('zbb-available')).toHaveText('$400.00');
+
+  // the Overview swaps the limits hero for zero-based cards
+  await page.goto('/dashboard');
+  const hero = page.getByTestId('zbb-hero').filter({ visible: true });
+  await expect(hero).toContainText('All assigned');
+  await expect(page.getByTestId('zbb-suggestion-all-good').filter({ visible: true })).toBeVisible();
+  await expect(page.getByTestId('zbb-health-Groceries').filter({ visible: true })).toContainText(
+    'On track',
+  );
+  await page.goto('/budgets');
 
   // assigning more than exists shows the error state instead of being refused
   await setAssigned(page, 'Fun', '900');
@@ -119,7 +137,9 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
     'true',
   );
   await page.goto('/budgets');
-  await expect(page.getByText('A monthly limit per category')).toBeVisible();
+  await expect(
+    page.getByText('A monthly limit per category. Status follows the limit, not the calendar.'),
+  ).toBeVisible();
   await expect(page.getByRole('link', { name: 'Groceries' })).toBeVisible();
   await expect(page.getByTestId('ready-to-assign')).toHaveCount(0);
 

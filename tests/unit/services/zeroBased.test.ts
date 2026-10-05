@@ -11,6 +11,7 @@ const { prismaMock } = vi.hoisted(() => {
       findUnique: vi.fn(),
       upsert: vi.fn(),
       deleteMany: vi.fn(),
+      aggregate: vi.fn(),
     },
     budget: { findMany: vi.fn() },
     reimbursementLink: { findMany: vi.fn() },
@@ -25,14 +26,8 @@ const { prismaMock } = vi.hoisted(() => {
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: prismaMock }));
 
-const {
-  assignToTargets,
-  getZbbMonth,
-  listBudgetsForMode,
-  moveMoney,
-  setAssignment,
-  setBudgetMode,
-} = await import('@/lib/services/zeroBased');
+const { assignToTargets, getZbbMonth, getZbbOverview, moveMoney, setAssignment, setBudgetMode } =
+  await import('@/lib/services/zeroBased');
 const { ServiceValidationError } = await import('@/lib/services/common');
 
 type TxRow = {
@@ -404,36 +399,57 @@ describe('assignToTargets', () => {
   });
 });
 
-describe('listBudgetsForMode', () => {
-  it('maps funded zero-based categories to limit/spent pairs', async () => {
+describe('getZbbOverview', () => {
+  it('adds on-budget income, next month assignments and insights to the month', async () => {
     zeroBased();
     prismaMock.categoryAssignment.findMany.mockResolvedValue([
       { categoryId: 'food', month: 202610, amount: 500 },
     ]);
+    prismaMock.transaction.groupBy.mockResolvedValue([{ type: 'INCOME', _sum: { amount: 0 } }]);
     mockTransactions({
       expenses: [
         {
           id: 't',
           categoryId: 'food',
-          amount: 120,
+          amount: 600,
           date: new Date('2026-10-05'),
           isTransfer: false,
           transferMatchId: null,
         },
       ],
     });
+    // first aggregate call is the uncategorized summary, then on-budget income
+    prismaMock.transaction.aggregate
+      .mockResolvedValueOnce({ _count: { _all: 0 }, _sum: { amount: null } })
+      .mockResolvedValueOnce({ _sum: { amount: 4200 } });
+    prismaMock.categoryAssignment.aggregate.mockResolvedValue({ _sum: { amount: 250 } });
 
-    const result = await listBudgetsForMode('user-1', 202610);
+    const result = await getZbbOverview('user-1', 202610);
 
-    expect(result).toEqual([
-      {
-        id: 'zbb-food-202610',
-        categoryId: 'food',
-        categoryName: 'Groceries',
-        month: 202610,
-        limitAmount: '500.00',
-        spent: '120.00',
-      },
-    ]);
+    expect(result).toEqual(
+      expect.objectContaining({
+        incomeThisMonth: '4200.00',
+        assignedThisMonth: '500.00',
+        spentThisMonth: '600.00',
+        availableTotal: '-100.00',
+        nextMonthAssigned: '250.00',
+        overspent: '100.00',
+      }),
+    );
+    expect(result.health[0]).toEqual(
+      expect.objectContaining({ categoryName: 'Groceries', status: 'overspent' }),
+    );
+    expect(result.suggestions.map((s) => s.id)).toContain('overspent');
+    // income only counts on-budget accounts and skips transfers and card payments
+    expect(prismaMock.transaction.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          account: { onBudget: true },
+          type: 'INCOME',
+          isTransfer: false,
+          isPayment: false,
+        }),
+      }),
+    );
   });
 });
