@@ -39,6 +39,11 @@ export const assignToTargetsSchema = z.object({
   month: monthSchema,
 });
 
+/** `?month=` on the zero-based month read */
+export const zbbMonthQuerySchema = z.object({
+  month: monthSchema,
+});
+
 export type BudgetModeInput = z.infer<typeof budgetModeSchema>;
 export type SetAssignmentInput = z.infer<typeof setAssignmentSchema>;
 export type MoveMoneyInput = z.infer<typeof moveMoneySchema>;

@@ -282,8 +282,12 @@ E2E (`tests/e2e/zero-based-budgeting.spec.ts`, Playwright):
   month (plus one counterpart lookup for transfers), not `$queryRaw`. It keeps the service
   testable with the existing Prisma mocks; revisit with a grouped query if a user's history
   makes it slow.
-- Targets are read-only in zero-based mode. They come from spending limits, which are edited in
-  limits mode. The page says so.
+- Targets are edited from the zero-based view (a target link under each category opens a
+  dialog). They are still stored as spending limits through the existing `/api/budgets` calls:
+  a target set in the viewed month is patched, one carried from an earlier month forks a new
+  value from the viewed month, and Remove clears it from its origin month onward, same as the
+  limits screen. After a change the view refetches the month via
+  `GET /api/budgets/assignments?month=`.
 - Edge case accepted: a reimbursement paid into an off-budget account still returns money to
   the expense's category, but doesn't raise the on-budget balance, so Ready to Assign drops by
   that amount until the user moves the money.
@@ -292,7 +296,8 @@ E2E (`tests/e2e/zero-based-budgeting.spec.ts`, Playwright):
 
 ## Follow-ups
 
-- Edit targets directly from the zero-based view.
+- A "save X per month" target type. Today's targets top a category up _to_ an amount, which
+  suits spending categories but not growing savings.
 - YNAB-style credit card payment categories (non-goal for now).
 
 ## Checklist

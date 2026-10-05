@@ -169,6 +169,8 @@ describe('getZbbMonth', () => {
       activity: '0.00',
       available: '600.00',
       target: null,
+      targetBudgetId: null,
+      targetMonth: null,
     });
     // balances only ever read on-budget accounts
     expect(prismaMock.transaction.groupBy).toHaveBeenCalledWith(
@@ -260,13 +262,15 @@ describe('getZbbMonth', () => {
   it('uses the effective spending limit as each category target', async () => {
     zeroBased();
     prismaMock.budget.findMany.mockResolvedValue([
-      { categoryId: 'food', limitAmount: 600 },
-      { categoryId: 'food', limitAmount: 400 },
+      { id: 'b-new', categoryId: 'food', month: 202609, limitAmount: 600 },
+      { id: 'b-old', categoryId: 'food', month: 202601, limitAmount: 400 },
     ]);
 
     const result = await getZbbMonth('user-1', 202610);
 
-    expect(result.categories.find((c) => c.categoryId === 'food')?.target).toBe('600.00');
+    expect(result.categories.find((c) => c.categoryId === 'food')).toEqual(
+      expect.objectContaining({ target: '600.00', targetBudgetId: 'b-new', targetMonth: 202609 }),
+    );
     expect(result.categories.find((c) => c.categoryId === 'save')?.target).toBeNull();
   });
 });
@@ -372,7 +376,9 @@ describe('moveMoney', () => {
 describe('assignToTargets', () => {
   beforeEach(() => {
     zeroBased();
-    prismaMock.budget.findMany.mockResolvedValue([{ categoryId: 'food', limitAmount: 600 }]);
+    prismaMock.budget.findMany.mockResolvedValue([
+      { id: 'b1', categoryId: 'food', month: 202609, limitAmount: 600 },
+    ]);
   });
 
   it('tops every category up to its target when Ready to Assign covers it', async () => {

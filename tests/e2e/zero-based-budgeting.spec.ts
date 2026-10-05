@@ -91,17 +91,25 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
   await setAssigned(page, 'Fun', '400');
   await expect(ready).toContainText('All assigned');
 
-  // a target the money can't cover: nothing is assigned, the shortfall is named
-  await page.request.post('/api/budgets', {
-    data: {
-      categoryId: groceries.id,
-      month: Number(today().slice(0, 7).replace('-', '')),
-      limitAmount: 5000,
-    },
-  });
-  await page.reload();
+  // targets are edited in place; one the money can't cover assigns nothing
+  // and names the shortfall
+  await page.getByRole('button', { name: 'Set target for Groceries' }).click();
+  const targetDialog = page.getByRole('dialog');
+  await targetDialog.getByLabel('Monthly target').fill('5000');
+  await targetDialog.getByRole('button', { name: 'Save target' }).click();
+  await expect(page.getByRole('button', { name: 'Edit target for Groceries' })).toContainText(
+    'target $5,000.00',
+  );
   await page.getByRole('button', { name: 'Assign to targets' }).click();
   await expect(page.getByText('needs $3400.00 but only $0.00 is ready to assign')).toBeVisible();
+
+  // lowering the target to what's already there needs nothing more
+  await page.getByRole('button', { name: 'Edit target for Groceries' }).click();
+  await targetDialog.getByLabel('Monthly target').fill('1600');
+  await targetDialog.getByRole('button', { name: 'Save target' }).click();
+  await expect(page.getByRole('button', { name: 'Edit target for Groceries' })).toContainText(
+    'target $1,600.00',
+  );
 
   // switching back shows the limits view; the limit set above is intact
   await page.goto('/settings');

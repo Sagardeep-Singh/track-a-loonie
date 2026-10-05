@@ -6,7 +6,7 @@ import { ArrowRightLeft, Check, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
 import { Modal } from '@/components/ui/modal';
-import { postJSON, putJSON } from '@/lib/api-client';
+import { deleteJSON, getJSON, patchJSON, postJSON, putJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { monthLabel } from '@/lib/period-selection';
 import type { FrontendZbbCategory, FrontendZbbMonth } from '@/lib/services/zeroBased';
@@ -21,6 +21,7 @@ const withoutKey = (record: Record<string, string>, key: string): Record<string,
 };
 
 type MoveDraft = { fromCategoryId: string; toCategoryId: string; amount: string };
+type TargetDraft = { category: FrontendZbbCategory; amount: string };
 
 const readyTone = (ready: number): { text: string; label: string; detail: string } => {
   if (ready < 0) {
@@ -60,6 +61,9 @@ export const ZeroBasedView = ({
   const [movePending, setMovePending] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [targetsPending, setTargetsPending] = useState(false);
+  const [targetEdit, setTargetEdit] = useState<TargetDraft | null>(null);
+  const [targetPending, setTargetPending] = useState(false);
+  const [targetError, setTargetError] = useState<string | null>(null);
 
   const { month, startMonth, categories, uncategorizedOnBudget } = data;
   const ready = Number(data.readyToAssign);
@@ -142,6 +146,41 @@ export const ZeroBasedView = ({
       return;
     }
     setData(res.data);
+  };
+
+  const openTarget = (category: FrontendZbbCategory): void => {
+    setTargetError(null);
+    setTargetEdit({ category, amount: category.target ?? '' });
+  };
+
+  /**
+   * Targets are spending limits, written through the same /api/budgets calls
+   * the limits screen uses: a target set in this month is patched in place, one
+   * carried from an earlier month forks a new value from this month on.
+   */
+  const saveTarget = async (remove: boolean): Promise<void> => {
+    if (!targetEdit) return;
+    const { category, amount } = targetEdit;
+    setTargetPending(true);
+    setTargetError(null);
+    const res = remove
+      ? await deleteJSON(`/api/budgets/${category.targetBudgetId}`)
+      : category.targetBudgetId && category.targetMonth === month
+        ? await patchJSON(`/api/budgets/${category.targetBudgetId}`, { limitAmount: amount })
+        : await postJSON('/api/budgets', {
+            categoryId: category.categoryId,
+            month,
+            limitAmount: amount,
+          });
+    if (!res.ok) {
+      setTargetPending(false);
+      setTargetError(remove ? 'Could not remove that target.' : 'Enter an amount above zero.');
+      return;
+    }
+    const refreshed = await getJSON<FrontendZbbMonth>(`/api/budgets/assignments?month=${month}`);
+    setTargetPending(false);
+    if (refreshed.ok) setData(refreshed.data);
+    setTargetEdit(null);
   };
 
   return (
@@ -232,10 +271,17 @@ export const ZeroBasedView = ({
                     <div className="font-display truncate text-[15px] font-semibold">
                       {c.categoryName}
                     </div>
-                    <div className="text-ink-muted font-mono text-[11.5px] tabular-nums">
-                      {Number(c.carriedIn) !== 0 && <>{money(c.carriedIn)} carried in</>}
-                      {Number(c.carriedIn) !== 0 && c.target !== null && ' · '}
-                      {c.target !== null && <>target {money(c.target)}</>}
+                    <div className="text-ink-muted flex flex-wrap items-center gap-x-1.5 font-mono text-[11.5px] tabular-nums">
+                      {Number(c.carriedIn) !== 0 && <span>{money(c.carriedIn)} carried in ·</span>}
+                      <button
+                        type="button"
+                        onClick={() => openTarget(c)}
+                        className="hover:text-iris inline-flex items-center gap-1"
+                        aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
+                      >
+                        <Target size={12} />
+                        {c.target === null ? 'Set target' : `target ${money(c.target)}`}
+                      </button>
                     </div>
                   </div>
                   <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 sm:col-start-auto sm:row-start-auto">
@@ -300,9 +346,72 @@ export const ZeroBasedView = ({
       )}
 
       <p className="text-ink-muted mt-3 text-xs leading-snug">
-        Targets come from your spending limits. Switch to spending limits in Settings to change
-        them; your assignments are kept.
+        A target is how much a category should have to spend each month. It&apos;s the same number
+        as the category&apos;s spending limit, so it carries into later months until you change it.
       </p>
+
+      <Modal
+        open={targetEdit !== null}
+        onClose={() => setTargetEdit(null)}
+        title={targetEdit ? `Target for ${targetEdit.category.categoryName}` : 'Target'}
+      >
+        {targetEdit && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveTarget(false);
+            }}
+            className="flex flex-col gap-3"
+          >
+            <div>
+              <Label htmlFor="target-amount">Monthly target</Label>
+              <Input
+                id="target-amount"
+                className="font-mono"
+                type="number"
+                step="0.01"
+                min="0.01"
+                inputMode="decimal"
+                autoFocus
+                value={targetEdit.amount}
+                onChange={(e) => setTargetEdit({ ...targetEdit, amount: e.target.value })}
+                required
+              />
+              <p className="text-ink-muted mt-1 text-xs">
+                Applies from {monthLabel(month)} onward. Earlier months keep their target.
+              </p>
+            </div>
+            {targetEdit.category.targetMonth !== null &&
+              targetEdit.category.targetMonth < month && (
+                <p className="text-ink-muted text-xs">
+                  This target was set in {monthLabel(targetEdit.category.targetMonth)}. Removing it
+                  clears it from then onward, including earlier months.
+                </p>
+              )}
+            {targetError && (
+              <p className="text-rose text-sm" role="alert">
+                {targetError}
+              </p>
+            )}
+            <div className="flex gap-2.5">
+              {targetEdit.category.targetBudgetId && (
+                <Button
+                  type="button"
+                  variant="danger"
+                  disabled={targetPending}
+                  onClick={() => saveTarget(true)}
+                  title={`Clears the target from ${monthLabel(targetEdit.category.targetMonth ?? month)} onward`}
+                >
+                  Remove
+                </Button>
+              )}
+              <Button type="submit" icon={Check} loading={targetPending} className="flex-1">
+                Save target
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       <Modal open={move !== null} onClose={() => setMove(null)} title="Move money">
         {move && (

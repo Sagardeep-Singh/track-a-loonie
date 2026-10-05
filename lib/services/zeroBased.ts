@@ -32,6 +32,10 @@ export type FrontendZbbCategory = {
   available: string;
   /** effective spending limit for this month, reused as the top-up target */
   target: string | null;
+  /** the Budget row behind `target` and the month it was set in, so the
+   * screen can patch it in place or fork a new value from this month */
+  targetBudgetId: string | null;
+  targetMonth: number | null;
 };
 
 export type FrontendZbbMonth = {
@@ -272,7 +276,9 @@ export const getZbbMonth = async (userId: string, month: number): Promise<Fronte
         assigned: fromCents(c.assignedCents),
         activity: fromCents(c.activityCents),
         available: fromCents(c.availableCents),
-        target: limit === undefined ? null : limit.toFixed(2),
+        target: limit ? limit.limitAmount.toFixed(2) : null,
+        targetBudgetId: limit?.budgetId ?? null,
+        targetMonth: limit?.month ?? null,
       };
     }),
   };
