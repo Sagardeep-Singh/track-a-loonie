@@ -16,7 +16,7 @@ Let a signed-out user who forgot their password set a new one through an emailed
 - Rate limits: per IP (10/hour) on the request action, per address (3/hour) on sends. Over the per-address limit it skips silently so the response stays identical.
 - When Brevo isn't configured the link is hidden on the login page and `/forgot-password` says resets aren't available on this deployment.
 
-Address lookup is case-insensitive (signup stores addresses as typed). If several accounts differ only by case, an exact match wins; with no exact match nothing is sent.
+Email normalization: every address is trimmed and lowercased (`normalizeEmail` / `emailField` in `lib/validators/email.ts`) on signup, credentials login, Google sign-in, password reset, and the bootstrap/seed scripts. Migration `20261005130000_normalize_user_emails` lowercases existing rows and aborts with a query to find them if two accounts would collide, so those can be resolved by hand first.
 
 ## Non-goals
 
@@ -28,7 +28,7 @@ Address lookup is case-insensitive (signup stores addresses as typed). If severa
 
 Every branch logs one `[password-reset] <event> key=value` line so a missing email can be traced. Fields are user ids, `tokenRef` (first 12 hex chars of the stored `tokenHash`, so `WHERE "tokenHash" LIKE '<ref>%'` finds the row), Brevo `messageId`, and error names/codes. Never the address, the raw token, or a raw error message.
 
-- Request: `request.rejected reason=ip-rate-limit`, `request.skipped reason=email-not-configured|per-address-rate-limit`, `request.no-account`, `request.ambiguous-account matches=n`, `request.google-only`, `token.issued`, `request failed: <name> <code>` (action catch).
+- Request: `request.rejected reason=ip-rate-limit`, `request.skipped reason=email-not-configured|per-address-rate-limit`, `request.no-account`, `request.google-only`, `token.issued`, `request failed: <name> <code>` (action catch).
 - Send: `email.sent kind=reset|google-notice messageId=…`, `email.failed … error=… reason=…`.
 - Reset page and submit: `token.checked status=valid|invalid|expired`, `reset.rejected reason=invalid|expired|used-concurrently`, `reset.completed`.
 
@@ -91,3 +91,4 @@ New `PasswordResetToken` model (same shape as `EmailVerificationToken`) + migrat
 - [x] E2E spec
 - [x] format:fix, lint, unit tests, e2e
 - [x] Debug logging on the request, send and reset paths
+- [x] Normalize emails on every write and lookup, migrate existing rows

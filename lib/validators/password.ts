@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { emailField } from '@/lib/validators/email';
 
 export const MIN_PASSWORD_LENGTH = 12;
 export const MAX_PASSWORD_BYTES = 72;
@@ -20,7 +21,7 @@ export const changePasswordSchema = z.object({
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 
 export const forgotPasswordSchema = z.object({
-  email: z.string().trim().email('Enter a valid email address.'),
+  email: emailField,
 });
 
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;

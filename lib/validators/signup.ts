@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { emailField } from '@/lib/validators/email';
 import { MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH } from '@/lib/validators/password';
 
 export const signUpSchema = z.object({
   name: z.string().trim().min(1, 'Enter your name.').max(120),
-  email: z.string().trim().email('Enter a valid email address.'),
+  email: emailField,
   password: z
     .string()
     .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`)

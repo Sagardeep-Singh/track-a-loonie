@@ -4,6 +4,7 @@ import Google from 'next-auth/providers/google';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
 import { findOrCreateGoogleUser } from '@/lib/services/users';
+import { normalizeEmail } from '@/lib/validators/email';
 import { checkRateLimit, RateLimitedError } from '@/lib/services/rateLimit';
 import { clientIpFromHeaders } from '@/lib/http/clientIp';
 import { AuthRateLimitedError } from '@/lib/auth/errors';
@@ -42,11 +43,11 @@ export const authConfig: NextAuthConfig = {
         password: { label: 'Password', type: 'password' },
       },
       authorize: async (credentials, request) => {
-        const email = credentials?.email;
         const password = credentials?.password;
-        if (typeof email !== 'string' || typeof password !== 'string') {
+        if (typeof credentials?.email !== 'string' || typeof password !== 'string') {
           return null;
         }
+        const email = normalizeEmail(credentials.email);
 
         // Checked before the user lookup so a guess against a nonexistent
         // email still counts — otherwise account enumeration would be free.
@@ -54,12 +55,7 @@ export const authConfig: NextAuthConfig = {
           const ip = clientIpFromHeaders(request.headers);
           try {
             await checkRateLimit('login:ip', ip, LOGIN_IP_LIMIT, LOGIN_WINDOW_MS);
-            await checkRateLimit(
-              'login:email',
-              email.toLowerCase(),
-              LOGIN_EMAIL_LIMIT,
-              LOGIN_WINDOW_MS,
-            );
+            await checkRateLimit('login:email', email, LOGIN_EMAIL_LIMIT, LOGIN_WINDOW_MS);
           } catch (error) {
             if (error instanceof RateLimitedError) {
               throw new AuthRateLimitedError();

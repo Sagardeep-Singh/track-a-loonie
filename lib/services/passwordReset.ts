@@ -13,6 +13,7 @@ import { buildPasswordResetGoogleEmail } from '@/lib/email/password-reset-google
 import { appBaseUrl } from '@/lib/http/appUrl';
 import { ServiceValidationError } from '@/lib/services/common';
 import { checkRateLimit, RateLimitedError } from '@/lib/services/rateLimit';
+import { normalizeEmail } from '@/lib/validators/email';
 import type { ResetPasswordInput } from '@/lib/validators/password';
 
 const BCRYPT_ROUNDS = 12;
@@ -94,19 +95,16 @@ export const isPasswordResetConfigured = (): boolean => isEmailConfigured();
  * fatal (it isn't for the form, an error on one path would leak which path
  * ran).
  */
-export const requestPasswordReset = async (email: string): Promise<void> => {
+export const requestPasswordReset = async (rawEmail: string): Promise<void> => {
+  const email = normalizeEmail(rawEmail);
+
   if (!isPasswordResetConfigured()) {
     log('warn', 'request.skipped', { reason: 'email-not-configured' });
     return;
   }
 
   try {
-    await checkRateLimit(
-      'password-reset:email',
-      email.toLowerCase(),
-      REQUEST_HOURLY_LIMIT,
-      REQUEST_WINDOW_MS,
-    );
+    await checkRateLimit('password-reset:email', email, REQUEST_HOURLY_LIMIT, REQUEST_WINDOW_MS);
   } catch (error) {
     if (error instanceof RateLimitedError) {
       log('warn', 'request.skipped', {
@@ -118,23 +116,12 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     throw error;
   }
 
-  // Case-insensitive: signup stores the address as typed, so "Jane@x.com"
-  // must still find "jane@x.com". Signup doesn't stop two accounts that
-  // differ only by case, so an exact match wins, and with several matches
-  // and no exact one nothing is sent rather than picking a mailbox.
-  const matches = await prisma.user.findMany({
-    where: { email: { equals: email, mode: 'insensitive' } },
+  const user = await prisma.user.findUnique({
+    where: { email },
     select: { id: true, email: true, passwordHash: true },
   });
-  const user =
-    matches.find((candidate) => candidate.email === email) ??
-    (matches.length === 1 ? matches[0] : undefined);
   if (!user) {
-    if (matches.length > 1) {
-      log('warn', 'request.ambiguous-account', { matches: matches.length });
-    } else {
-      log('info', 'request.no-account');
-    }
+    log('info', 'request.no-account');
     return;
   }
 

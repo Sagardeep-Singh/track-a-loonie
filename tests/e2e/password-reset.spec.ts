@@ -66,16 +66,21 @@ test('resets a forgotten password through the emailed link', async ({ page }) =>
   await expect(page).toHaveURL(/\/dashboard/);
 });
 
-test('an address typed in a different case still gets the reset link', async ({ page }) => {
-  const storedEmail = `Mixed.${uniqueEmail()}`.replace('@example.com', '@Example.com');
-  await signUpThenSignOut(page, storedEmail);
+test('a mixed-case address is stored lowercase and works in any case', async ({ page }) => {
+  const typedAtSignup = uniqueEmail()
+    .replace('reset-', 'Reset.Mixed-')
+    .replace('@example', '@Example');
+  const stored = typedAtSignup.toLowerCase();
+  await signUpThenSignOut(page, typedAtSignup);
 
-  await requestReset(page, storedEmail.toLowerCase());
+  await requestReset(page, typedAtSignup.toUpperCase());
 
-  const sent = await lastEmailTo(storedEmail);
+  const sent = await lastEmailTo(stored);
   expect(sent.subject).toBe('Reset your Track a Loonie password');
-  await page.goto(extractResetPath(sent.html));
-  await expect(page.getByLabel('New password', { exact: true })).toBeVisible();
+
+  await page.goto('/login');
+  await signIn(page, ` ${typedAtSignup.toUpperCase()} `, OLD_PASSWORD);
+  await expect(page).toHaveURL(/\/dashboard/);
 });
 
 test('an unknown email gets the same confirmation as a real one', async ({ page }) => {
