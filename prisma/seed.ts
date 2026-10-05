@@ -1,9 +1,10 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/db/prisma';
 import { provisionDefaultsForUser } from '../lib/services/defaults';
+import { normalizeEmail } from '../lib/validators/email';
 
 const main = async (): Promise<void> => {
-  const email = process.env.ADMIN_EMAIL ?? 'dev@example.com';
+  const email = normalizeEmail(process.env.ADMIN_EMAIL ?? 'dev@example.com');
   const password = process.env.ADMIN_PASSWORD ?? 'devpassword123';
 
   // destructive: local dev only, never run against production

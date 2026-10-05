@@ -29,6 +29,13 @@ describe('signUpSchema', () => {
     expect(result.data?.name).toBe('Jane');
   });
 
+  it('stores the email trimmed and lowercased', () => {
+    const result = parse({ email: '  Jane@Example.COM ' });
+
+    expect(result.success).toBe(true);
+    expect(result.data?.email).toBe('jane@example.com');
+  });
+
   it('rejects an invalid email', () => {
     const result = parse({ email: 'not-an-email' });
     expect(result.success).toBe(false);

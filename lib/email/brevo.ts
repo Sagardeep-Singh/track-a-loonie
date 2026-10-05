@@ -28,6 +28,12 @@ export class EmailSendError extends Error {
   }
 }
 
+/**
+ * `messageId` is Brevo's id for the accepted message, for looking it up in
+ * Brevo's transactional logs. Undefined if the 2xx body didn't carry one.
+ */
+export type SendEmailResult = { messageId?: string };
+
 export const isEmailConfigured = (): boolean => Boolean(apiKey() && senderEmail());
 
 export const sendEmail = async (params: {
@@ -36,7 +42,7 @@ export const sendEmail = async (params: {
   html: string;
   /** plain-text alternative, for clients that don't render HTML */
   text?: string;
-}): Promise<void> => {
+}): Promise<SendEmailResult> => {
   const key = apiKey();
   const from = senderEmail();
   if (!key || !from) {
@@ -67,4 +73,17 @@ export const sendEmail = async (params: {
   if (!response.ok) {
     throw new EmailSendError(`brevo responded ${response.status}`);
   }
+
+  // Best-effort: the send already succeeded, so a body that isn't the
+  // expected JSON just means no id to report.
+  try {
+    const body: unknown = await response.json();
+    if (body && typeof body === 'object' && 'messageId' in body) {
+      const { messageId } = body;
+      return typeof messageId === 'string' ? { messageId } : {};
+    }
+  } catch {
+    // no usable body
+  }
+  return {};
 };

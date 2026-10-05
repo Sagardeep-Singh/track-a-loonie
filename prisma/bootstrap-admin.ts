@@ -1,14 +1,16 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/db/prisma';
 import { provisionDefaultsForUser } from '../lib/services/defaults';
+import { normalizeEmail } from '../lib/validators/email';
 
 const main = async (): Promise<void> => {
-  const email = process.env.ADMIN_EMAIL;
+  const rawEmail = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
 
-  if (!email || !password) {
+  if (!rawEmail || !password) {
     throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD must be set');
   }
+  const email = normalizeEmail(rawEmail);
 
   const passwordHash = await bcrypt.hash(password, 12);
   const existing = await prisma.user.findUnique({ where: { email } });
