@@ -161,11 +161,18 @@ export const requestPasswordResetAction = async (
   }
 
   // Same response for every address, including when Brevo fails: an error
-  // on only one path would leak which path ran.
+  // on only one path would leak which path ran. Logged (name and Prisma code
+  // only, never the message, which can echo the address) so a missing
+  // migration or a Brevo outage isn't invisible.
   try {
     await requestPasswordReset(parsed.data.email);
-  } catch {
-    // swallowed deliberately, see comment above
+  } catch (error) {
+    const name = error instanceof Error ? error.name : 'unknown';
+    const code =
+      error instanceof Error && 'code' in error && typeof error.code === 'string'
+        ? ` ${error.code}`
+        : '';
+    console.error(`[password-reset] request failed: ${name}${code}`);
   }
 
   redirect('/forgot-password?sent=1');

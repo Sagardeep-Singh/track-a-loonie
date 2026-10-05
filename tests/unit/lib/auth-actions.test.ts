@@ -192,12 +192,22 @@ describe('requestPasswordResetAction', () => {
     expect(requestPasswordResetMock).not.toHaveBeenCalled();
   });
 
-  it('gives the same redirect when the send fails', async () => {
-    requestPasswordResetMock.mockRejectedValue(new Error('brevo down'));
+  it('gives the same redirect when the send fails, and logs it without the address', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failure = Object.assign(new Error('table for a@example.com missing'), {
+      name: 'PrismaClientKnownRequestError',
+      code: 'P2021',
+    });
+    requestPasswordResetMock.mockRejectedValue(failure);
 
     expect(await submitTo(requestPasswordResetAction, { email: 'a@example.com' })).toBe(
       '/forgot-password?sent=1',
     );
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[password-reset] request failed: PrismaClientKnownRequestError P2021',
+    );
+    expect(errorSpy.mock.calls.flat().join(' ')).not.toContain('a@example.com');
+    errorSpy.mockRestore();
   });
 });
 

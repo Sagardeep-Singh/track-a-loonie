@@ -56,6 +56,7 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     );
   } catch (error) {
     if (error instanceof RateLimitedError) {
+      console.warn('[password-reset] per-address limit hit, email skipped');
       return;
     }
     throw error;
