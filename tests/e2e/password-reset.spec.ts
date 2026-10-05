@@ -66,6 +66,18 @@ test('resets a forgotten password through the emailed link', async ({ page }) =>
   await expect(page).toHaveURL(/\/dashboard/);
 });
 
+test('an address typed in a different case still gets the reset link', async ({ page }) => {
+  const storedEmail = `Mixed.${uniqueEmail()}`.replace('@example.com', '@Example.com');
+  await signUpThenSignOut(page, storedEmail);
+
+  await requestReset(page, storedEmail.toLowerCase());
+
+  const sent = await lastEmailTo(storedEmail);
+  expect(sent.subject).toBe('Reset your Track a Loonie password');
+  await page.goto(extractResetPath(sent.html));
+  await expect(page.getByLabel('New password', { exact: true })).toBeVisible();
+});
+
 test('an unknown email gets the same confirmation as a real one', async ({ page }) => {
   await requestReset(page, uniqueEmail());
 });

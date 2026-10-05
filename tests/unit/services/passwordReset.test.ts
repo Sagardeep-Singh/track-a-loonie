@@ -12,7 +12,7 @@ const { prismaMock, sendEmailMock, isEmailConfiguredMock, checkRateLimitMock, bc
       },
       user: {
         update: vi.fn(),
-        findUnique: vi.fn(),
+        findMany: vi.fn(),
       },
       $transaction: vi.fn(),
     },
@@ -71,12 +71,12 @@ describe('requestPasswordReset', () => {
     await requestPasswordReset('a@b.com');
 
     expect(checkRateLimitMock).not.toHaveBeenCalled();
-    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.user.findMany).not.toHaveBeenCalled();
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
   it('rate limits per lowercased address', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.user.findMany.mockResolvedValue([]);
 
     await requestPasswordReset('A@B.com');
 
@@ -88,12 +88,12 @@ describe('requestPasswordReset', () => {
 
     await expect(requestPasswordReset('a@b.com')).resolves.toBeUndefined();
 
-    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.user.findMany).not.toHaveBeenCalled();
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
   it('sends nothing for an unknown address', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.user.findMany.mockResolvedValue([]);
 
     await requestPasswordReset('nobody@b.com');
 
@@ -102,11 +102,13 @@ describe('requestPasswordReset', () => {
   });
 
   it('sends the "use Google" notice and issues no token for a Google-only account', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({
-      id: 'user-1',
-      email: 'g@b.com',
-      passwordHash: null,
-    });
+    prismaMock.user.findMany.mockResolvedValue([
+      {
+        id: 'user-1',
+        email: 'g@b.com',
+        passwordHash: null,
+      },
+    ]);
 
     await requestPasswordReset('g@b.com');
 
@@ -118,11 +120,13 @@ describe('requestPasswordReset', () => {
 
   it('stores only the token hash, with a 1h expiry, and emails the raw token', async () => {
     vi.useFakeTimers({ now: new Date('2026-10-05T12:00:00Z') });
-    prismaMock.user.findUnique.mockResolvedValue({
-      id: 'user-1',
-      email: 'a@b.com',
-      passwordHash: 'old-hash',
-    });
+    prismaMock.user.findMany.mockResolvedValue([
+      {
+        id: 'user-1',
+        email: 'a@b.com',
+        passwordHash: 'old-hash',
+      },
+    ]);
 
     await requestPasswordReset('a@b.com');
     vi.useRealTimers();
@@ -142,14 +146,76 @@ describe('requestPasswordReset', () => {
   });
 
   it('propagates a send failure to the caller', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({
-      id: 'user-1',
-      email: 'a@b.com',
-      passwordHash: 'old-hash',
-    });
+    prismaMock.user.findMany.mockResolvedValue([
+      {
+        id: 'user-1',
+        email: 'a@b.com',
+        passwordHash: 'old-hash',
+      },
+    ]);
     sendEmailMock.mockRejectedValue(new Error('brevo down'));
 
     await expect(requestPasswordReset('a@b.com')).rejects.toThrow('brevo down');
+  });
+});
+
+describe('requestPasswordReset email matching', () => {
+  const stored = { id: 'user-1', email: 'Jane.Doe@Example.com', passwordHash: 'old-hash' };
+
+  it('looks the address up case-insensitively', async () => {
+    prismaMock.user.findMany.mockResolvedValue([]);
+
+    await requestPasswordReset('jane.doe@example.com');
+
+    expect(prismaMock.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: { equals: 'jane.doe@example.com', mode: 'insensitive' } },
+      }),
+    );
+  });
+
+  it('sends to the stored address when the input differs only by case', async () => {
+    prismaMock.user.findMany.mockResolvedValue([stored]);
+
+    await requestPasswordReset('JANE.DOE@EXAMPLE.COM');
+
+    expect(prismaMock.passwordResetToken.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 'user-1' } }),
+    );
+    expect(sendEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'Jane.Doe@Example.com' }),
+    );
+  });
+
+  it('prefers the exact match when two accounts differ only by case', async () => {
+    prismaMock.user.findMany.mockResolvedValue([
+      stored,
+      { id: 'user-2', email: 'jane.doe@example.com', passwordHash: 'other-hash' },
+    ]);
+
+    await requestPasswordReset('jane.doe@example.com');
+
+    expect(prismaMock.passwordResetToken.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 'user-2' } }),
+    );
+    expect(sendEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'jane.doe@example.com' }),
+    );
+  });
+
+  it('sends nothing and logs when several accounts match and none exactly', async () => {
+    prismaMock.user.findMany.mockResolvedValue([
+      stored,
+      { id: 'user-2', email: 'jane.doe@example.com', passwordHash: 'other-hash' },
+    ]);
+
+    await requestPasswordReset('JANE.DOE@example.COM');
+
+    expect(prismaMock.passwordResetToken.upsert).not.toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(logSpies.warn).toHaveBeenCalledWith(
+      '[password-reset] request.ambiguous-account matches=2',
+    );
   });
 });
 
@@ -289,7 +355,7 @@ describe('logging', () => {
   });
 
   it('logs an unknown address without the address', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.user.findMany.mockResolvedValue([]);
 
     await requestPasswordReset('secret@b.com');
 
@@ -298,7 +364,7 @@ describe('logging', () => {
   });
 
   it('logs the Google-only branch and the notice send', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ ...passwordUser, passwordHash: null });
+    prismaMock.user.findMany.mockResolvedValue([{ ...passwordUser, passwordHash: null }]);
 
     await requestPasswordReset('secret@b.com');
 
@@ -311,7 +377,7 @@ describe('logging', () => {
   });
 
   it('logs the issued token by hash prefix and the send, never the raw token or address', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(passwordUser);
+    prismaMock.user.findMany.mockResolvedValue([passwordUser]);
 
     await requestPasswordReset('secret@b.com');
 
@@ -334,7 +400,7 @@ describe('logging', () => {
   });
 
   it('logs a Brevo failure with its status but not the address', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(passwordUser);
+    prismaMock.user.findMany.mockResolvedValue([passwordUser]);
     sendEmailMock.mockRejectedValue(new EmailSendError('brevo responded 401'));
 
     await expect(requestPasswordReset('secret@b.com')).rejects.toThrow(EmailSendError);

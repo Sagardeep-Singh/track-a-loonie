@@ -118,14 +118,23 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     throw error;
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email },
+  // Case-insensitive: signup stores the address as typed, so "Jane@x.com"
+  // must still find "jane@x.com". Signup doesn't stop two accounts that
+  // differ only by case, so an exact match wins, and with several matches
+  // and no exact one nothing is sent rather than picking a mailbox.
+  const matches = await prisma.user.findMany({
+    where: { email: { equals: email, mode: 'insensitive' } },
     select: { id: true, email: true, passwordHash: true },
   });
+  const user =
+    matches.find((candidate) => candidate.email === email) ??
+    (matches.length === 1 ? matches[0] : undefined);
   if (!user) {
-    // Exact-match lookup, same as sign-in: a case difference from the
-    // address used at signup lands here too.
-    log('info', 'request.no-account');
+    if (matches.length > 1) {
+      log('warn', 'request.ambiguous-account', { matches: matches.length });
+    } else {
+      log('info', 'request.no-account');
+    }
     return;
   }
 
