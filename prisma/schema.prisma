@@ -63,6 +63,7 @@ model User {
   notificationPreference NotificationPreference?
   aiSettings             UserAiSettings?
   emailVerificationToken EmailVerificationToken?
+  passwordResetToken     PasswordResetToken?
 }
 
 /// One row per user, replaced (not appended) on every (re)send — sending a
@@ -71,6 +72,20 @@ model User {
 /// the emailed link; `tokenHash` is its SHA-256 hex digest, same reasoning
 /// as never storing a plaintext password.
 model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Same shape and reasoning as `EmailVerificationToken`: one row per user,
+/// replaced on every request so only the newest emailed link works, and only
+/// the SHA-256 of the raw token is stored. Deleted once used. See
+/// lib/services/passwordReset.ts.
+model PasswordResetToken {
   id        String   @id @default(cuid())
   userId    String   @unique
   tokenHash String   @unique

@@ -6,6 +6,9 @@ import { signIn, signOut } from '@/auth';
 import { AuthError } from 'next-auth';
 import { createUser } from '@/lib/services/users';
 import { signUpSchema } from '@/lib/validators/signup';
+import { forgotPasswordSchema, resetPasswordSchema } from '@/lib/validators/password';
+import { ServiceValidationError } from '@/lib/services/common';
+import { requestPasswordReset, resetPassword } from '@/lib/services/passwordReset';
 import { checkRateLimit, RateLimitedError } from '@/lib/services/rateLimit';
 import { clientIpFromHeaders } from '@/lib/http/clientIp';
 import { AuthRateLimitedError } from '@/lib/auth/errors';
@@ -23,6 +26,11 @@ const TOO_MANY_ATTEMPTS = 'Too many attempts. Try again in a few minutes.';
 // window with a lower cap is enough).
 const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
 const SIGNUP_IP_LIMIT = 5;
+
+// Per-address sends are capped in the service; this bounds how many
+// addresses one source can spray reset emails at.
+const PASSWORD_RESET_WINDOW_MS = 60 * 60 * 1000;
+const PASSWORD_RESET_IP_LIMIT = 10;
 
 // See lib/auth/config.ts's matching flag — same reasoning, the e2e suite
 // creates far more accounts per run than any real signup source would.
@@ -124,4 +132,67 @@ export const signUpAction = async (
   }
 
   redirect(`/login?signup=${isEmailVerificationConfigured() ? 'check-email' : 'done'}`);
+};
+
+export const requestPasswordResetAction = async (
+  _prevState: string | undefined,
+  formData: FormData,
+): Promise<string | undefined> => {
+  const parsed = forgotPasswordSchema.safeParse({ email: formData.get('email') });
+  if (!parsed.success) {
+    return parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+  }
+
+  if (!rateLimitDisabled) {
+    const ip = clientIpFromHeaders(await headers());
+    try {
+      await checkRateLimit(
+        'password-reset:ip',
+        ip,
+        PASSWORD_RESET_IP_LIMIT,
+        PASSWORD_RESET_WINDOW_MS,
+      );
+    } catch (error) {
+      if (error instanceof RateLimitedError) {
+        return TOO_MANY_ATTEMPTS;
+      }
+      throw error;
+    }
+  }
+
+  // Same response for every address, including when Brevo fails: an error
+  // on only one path would leak which path ran.
+  try {
+    await requestPasswordReset(parsed.data.email);
+  } catch {
+    // swallowed deliberately, see comment above
+  }
+
+  redirect('/forgot-password?sent=1');
+};
+
+export const resetPasswordAction = async (
+  _prevState: string | undefined,
+  formData: FormData,
+): Promise<string | undefined> => {
+  const newPassword = formData.get('newPassword');
+  if (newPassword !== formData.get('confirmNewPassword')) {
+    return 'New password and confirmation do not match.';
+  }
+
+  const parsed = resetPasswordSchema.safeParse({ token: formData.get('token'), newPassword });
+  if (!parsed.success) {
+    return parsed.error.issues[0]?.message ?? 'Check the form and try again.';
+  }
+
+  try {
+    await resetPassword(parsed.data);
+  } catch (error) {
+    if (error instanceof ServiceValidationError) {
+      return error.message;
+    }
+    throw error;
+  }
+
+  redirect('/login?passwordReset=1');
 };

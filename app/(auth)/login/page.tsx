@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { SourceLink } from '@/components/nav/source-link';
 import { LoginForm } from '@/components/auth/login-form';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
-import { LogoMark } from '@/components/ui/logo-mark';
-import { Ring } from '@/components/ui/ring';
+import { isPasswordResetConfigured } from '@/lib/services/passwordReset';
+import { AuthAside } from '@/components/auth/auth-aside';
 
 const googleConfigured = Boolean(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
 
@@ -27,35 +27,20 @@ const SIGNUP_MESSAGES: Record<string, string> = {
 const LoginPage = async ({
   searchParams,
 }: {
-  searchParams: Promise<{ passwordChanged?: string; verify?: string; signup?: string }>;
+  searchParams: Promise<{
+    passwordChanged?: string;
+    passwordReset?: string;
+    verify?: string;
+    signup?: string;
+  }>;
 }): Promise<React.ReactElement> => {
-  const { passwordChanged, verify, signup } = await searchParams;
+  const { passwordChanged, passwordReset, verify, signup } = await searchParams;
   const verifyMessage = verify ? VERIFY_MESSAGES[verify] : undefined;
   const signupMessage = signup ? SIGNUP_MESSAGES[signup] : undefined;
 
   return (
     <>
-      <div className="bg-iris-soft mx-5 mt-5 flex flex-col justify-between rounded-3xl p-6 lg:mx-0 lg:mt-0 lg:rounded-none lg:p-14">
-        <div className="font-display flex items-center gap-2.5 text-[20px] font-semibold">
-          <LogoMark size={30} variant="spiral" />
-          trackaloonie
-        </div>
-        <div>
-          <div className="hidden lg:block">
-            <Ring size="hero" fraction={0.56} />
-          </div>
-          <h1 className="font-display mt-[18px] max-w-[400px] text-[26px] leading-[1.15] font-semibold tracking-[-0.02em] lg:mt-7 lg:text-[34px]">
-            Know what&rsquo;s left, not just what&rsquo;s gone.
-          </h1>
-          <p className="text-ink/75 mt-2.5 max-w-[420px] text-[13.5px] leading-snug lg:mt-3.5 lg:text-[15px]">
-            Import a statement, confirm a few categories, and Track a Loonie keeps the rest of the
-            month honest.
-          </p>
-        </div>
-        <div className="text-ink/60 mt-6 hidden text-[12.5px] lg:block">
-          Your data stays in your account. No bank credentials are stored.
-        </div>
-      </div>
+      <AuthAside />
       <div className="flex flex-col px-6 py-8 lg:items-center lg:justify-center lg:p-14">
         <div className="w-full lg:max-w-[360px] lg:animate-[fade-up_0.3s_ease-out]">
           <h2 className="font-display text-2xl font-semibold tracking-[-0.02em]">Sign in</h2>
@@ -63,6 +48,11 @@ const LoginPage = async ({
           {passwordChanged === '1' && (
             <p className="bg-sky-soft text-sky mb-4 rounded-lg px-3 py-2 text-sm" role="status">
               Password changed. Sign in with your new password.
+            </p>
+          )}
+          {passwordReset === '1' && (
+            <p className="bg-sky-soft text-sky mb-4 rounded-lg px-3 py-2 text-sm" role="status">
+              Password reset. Sign in with your new password.
             </p>
           )}
           {signupMessage && (
@@ -81,6 +71,13 @@ const LoginPage = async ({
             </p>
           )}
           <LoginForm />
+          {isPasswordResetConfigured() && (
+            <p className="mt-3 text-right text-[13px]">
+              <Link href="/forgot-password" className="text-iris font-medium">
+                Forgot password?
+              </Link>
+            </p>
+          )}
           {googleConfigured && (
             <>
               <div className="text-ink-muted my-5 flex items-center gap-3 text-xs">
