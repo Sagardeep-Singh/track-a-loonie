@@ -49,11 +49,14 @@ export const matchTransfers = async (
     // every CSV import, and without this guard it could silently flag a
     // reimbursement-linked row as a transfer, violating the mutual-exclusion
     // invariant with no user action and no error (the caller swallows
-    // failures from this function).
+    // failures from this function). A spread expense is excluded for the same
+    // reason: it's real spending by definition, and flagging it a transfer
+    // would break the spread/transfer exclusion.
     where: {
       userId,
       isTransfer: false,
       isReimbursable: false,
+      spreadMonths: null,
       reimbursementExpenseLinks: { none: {} },
       reimbursementIncomeLinks: { none: {} },
       ...(dateRange && {

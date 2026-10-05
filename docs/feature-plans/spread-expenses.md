@@ -90,7 +90,7 @@ existing rows are null.
 
 - `listSpreadSharesInRange(userId, fromMonth, toMonth): Promise<SpreadShareRow[]>`
   - Query: `type: 'EXPENSE', isTransfer: false, spreadMonths: { not: null },
-    spreadStartMonth: { lte: toMonth }, spreadEndMonth: { gte: fromMonth }`.
+spreadStartMonth: { lte: toMonth }, spreadEndMonth: { gte: fromMonth }`.
   - Selects `id, amount, categoryId, category.name, spreadStartMonth, spreadMonths`.
   - Returns one plain row per (transaction, month) inside the range:
     `{ transactionId, categoryId, categoryName, month, amount: string }`.
@@ -163,16 +163,25 @@ the service; they only need the new fields to flow through.
   is cash-based and won't list a payment dated in another month. See open question 1.
 - ui-designer spec to follow once the schema is approved.
 
-## Open questions
+## Resolved questions
 
-1. **Drilldown mismatch.** Clicking the "Property tax" budget card for March links to
-   Transactions filtered to March, but the payment is dated June. Options: (a) leave it, the
-   Transactions page is the ledger; (b) show a "Includes $300.00 spread from 1 transaction"
-   note on the drilldown with a link to the source payment; (c) add a "spread into this month"
-   section on the Transactions page. Leaning (b).
-2. **Should the Overview show a cash vs spread hint?** E.g. a small "Includes $300 of spread
-   expenses" line under `hero.expense`. Not needed for v1 but cheap.
-3. **Month count range.** Is 2 to 24 enough, or should it go to 36/60 for multi-year items?
+Settled when the owner asked to implement the plan, going with the plan's leanings:
+
+1. **Drilldown mismatch: option (b).** Overview's "Spending by category" card lists the month's
+   spread shares under the pie ("Includes $300.00 spread from 1 payment"), and each row links to
+   the real payment's day on Transactions. Transactions itself stays a cash ledger.
+2. **No separate cash vs spread hint under `hero.expense`.** The pie note covers it.
+3. **Month count stays 2 to 24.** `SPREAD_MAX_MONTHS` in `lib/spread.ts` is the one place to raise it.
+
+Implementation notes that differ slightly from the design above:
+
+- `FrontendTransaction` got flat `spreadStartMonth` / `spreadMonths` / `spreadMonthlyAmount`
+  fields (matching the existing flat reimbursement fields) instead of a nested `spread` object.
+- `addMonths`, `monthsBetween` and `monthOfDate` live in `lib/date.ts`; `allocateSpread`,
+  `spreadEndMonth` and the bounds live in `lib/spread.ts` (no Prisma, so the form's live preview
+  can import them).
+- `transactionsPage.ts` needed no change: its `include` already returns the new scalars.
+- Trends counts an uncategorized spread payment once, not once per month it covers.
 
 ## Non-goals (this iteration)
 
@@ -210,24 +219,22 @@ e2e (`tests/e2e/spread-expenses.spec.ts`):
 
 ## Checklist
 
-- [ ] Owner approves the schema change and answers the open questions
-- [ ] product-manager pass on user stories and acceptance criteria
-- [ ] software-architect review of this plan
-- [ ] ui-designer spec for the form section, badges and drilldown note
-- [ ] tester writes the full unit and e2e test plan
-- [ ] `prisma/schema.prisma`: `spreadStartMonth`, `spreadMonths`, `spreadEndMonth` + index
-- [ ] Migration `add_spread_expenses` + `npm run prisma:generate`
-- [ ] `lib/spread.ts` (or `lib/date.ts`): `addMonths`, `spreadEndMonth`, `allocateSpread`
-- [ ] `lib/validators/transactions.ts`: new fields + `refineSpread`
-- [ ] `lib/services/spreadExpenses.ts`: `listSpreadSharesInRange`
-- [ ] `lib/services/transactions.ts`: `spread` on `FrontendTransaction`, write path, DB-state guards
-- [ ] `lib/services/budgets.ts`: exclude spread rows, add shares
-- [ ] `lib/services/overview.ts`: hero/pie use shares, day bars/daySpent skip spread rows
-- [ ] `lib/services/trends.ts`: month and category totals use shares
-- [ ] `lib/services/transfers.ts`: exclude spread rows from matching
-- [ ] `lib/services/userData.ts`: export/import new fields
-- [ ] `lib/services/transactionsPage.ts`: select spread fields for the badge
-- [ ] UI: transaction form spread section, list and day panel badges, drilldown note
-- [ ] Unit tests for helpers, validator and changed services
-- [ ] e2e: `tests/e2e/spread-expenses.spec.ts`
-- [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
+- [x] Owner approves the schema change and answers the open questions
+- [ ] product-manager / software-architect / ui-designer / tester agent passes (skipped: the
+      owner went straight from the plan to implementation)
+- [x] `prisma/schema.prisma`: `spreadStartMonth`, `spreadMonths`, `spreadEndMonth` + index
+- [x] Migration `add_spread_expenses` + `npm run prisma:generate`
+- [x] `lib/date.ts` + `lib/spread.ts`: `addMonths`, `spreadEndMonth`, `allocateSpread`
+- [x] `lib/validators/transactions.ts`: new fields + `refineSpread`
+- [x] `lib/services/spreadExpenses.ts`: `listSpreadSharesInRange`
+- [x] `lib/services/transactions.ts`: spread fields on `FrontendTransaction`, write path, DB-state guards
+- [x] `lib/services/budgets.ts`: exclude spread rows, add shares
+- [x] `lib/services/overview.ts`: hero/pie use shares, day bars/daySpent skip spread rows
+- [x] `lib/services/trends.ts`: month and category totals use shares
+- [x] `lib/services/transfers.ts`: exclude spread rows from matching
+- [x] `lib/services/userData.ts` + `lib/validators/user-data.ts`: export/import new fields
+- [x] `lib/services/transactionsPage.ts`: no change needed (`include` carries the new columns)
+- [x] UI: transaction form spread section, list chip, day panel note, Overview spread note
+- [x] Unit tests for helpers, validator and changed services
+- [x] e2e: `tests/e2e/spread-expenses.spec.ts`
+- [x] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`

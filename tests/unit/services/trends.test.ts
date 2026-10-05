@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { prismaMock } = vi.hoisted(() => ({
+const { prismaMock, spreadFindMany } = vi.hoisted(() => ({
+  spreadFindMany: vi.fn(),
   prismaMock: {
     transaction: { findMany: vi.fn() },
     reimbursementLink: { findMany: vi.fn() },
@@ -15,10 +16,14 @@ vi.mock('@/lib/db/prisma', () => ({
     ...prismaMock,
     transaction: {
       ...prismaMock.transaction,
-      findMany: (args?: { where?: { reimbursementCompletedAt?: unknown } }) =>
+      findMany: (args?: {
+        where?: { reimbursementCompletedAt?: unknown; spreadEndMonth?: unknown };
+      }) =>
         args?.where?.reimbursementCompletedAt
           ? Promise.resolve([])
-          : prismaMock.transaction.findMany(args),
+          : args?.where?.spreadEndMonth
+            ? spreadFindMany(args)
+            : prismaMock.transaction.findMany(args),
     },
   },
 }));
@@ -28,9 +33,44 @@ const { getSpendingTrends } = await import('@/lib/services/trends');
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
+  spreadFindMany.mockResolvedValue([]);
 });
 
 describe('getSpendingTrends', () => {
+  it('spreads an expense across the months it covers instead of its payment month', async () => {
+    const tax = {
+      id: 'tax',
+      type: 'EXPENSE',
+      amount: 1200,
+      date: new Date(Date.UTC(2026, 1, 10)),
+      isPayment: false,
+      reimbursementIncomeLinks: [],
+      isTransfer: false,
+      payee: 'City',
+      categoryId: null,
+      category: null,
+      spreadStartMonth: 202511,
+      spreadMonths: 4,
+    };
+    prismaMock.transaction.findMany.mockResolvedValue([tax]);
+    spreadFindMany.mockResolvedValue([tax]);
+
+    // range 3 ending Feb 2026: current Dec-Feb, prior Sep-Nov
+    const result = await getSpendingTrends('user-1', { month: 202602, range: 3 });
+
+    expect(result.months.map((m) => [m.month, m.expense])).toEqual([
+      [202512, 300],
+      [202601, 300],
+      [202602, 300],
+    ]);
+    expect(spreadFindMany.mock.calls[0][0].where).toMatchObject({
+      spreadStartMonth: { lte: 202602 },
+      spreadEndMonth: { gte: 202509 },
+    });
+    // one uncategorized payment, not one per month it covers
+    expect(result.uncategorizedCount).toBe(1);
+  });
+
   it('buckets income/expense per month and computes the headline vs. the prior period', async () => {
     prismaMock.transaction.findMany.mockResolvedValue([
       // prior period (Jan): expense 100

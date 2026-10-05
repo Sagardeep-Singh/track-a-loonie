@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/prisma';
+import { spreadEndMonth } from '@/lib/spread';
 import { USER_DATA_FORMAT_VERSION, type UserDataFile } from '@/lib/validators/user-data';
 
 const decimalToString = (value: unknown): string => Number(value).toFixed(2);
@@ -70,6 +71,8 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         isReimbursable: true,
         reimbursementExpectedAmount: true,
         reimbursementCompletedAt: true,
+        spreadStartMonth: true,
+        spreadMonths: true,
         skippedAt: true,
         createdAt: true,
       },
@@ -153,6 +156,8 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
             ? null
             : decimalToString(t.reimbursementExpectedAmount),
         reimbursementCompletedAt: t.reimbursementCompletedAt,
+        spreadStartMonth: t.spreadStartMonth,
+        spreadMonths: t.spreadMonths,
         skippedAt: t.skippedAt,
         createdAt: t.createdAt,
       })),
@@ -326,6 +331,12 @@ export const importUserData = async (
             isReimbursable: t.isReimbursable,
             reimbursementExpectedAmount: t.reimbursementExpectedAmount,
             reimbursementCompletedAt: t.reimbursementCompletedAt,
+            spreadStartMonth: t.spreadMonths == null ? null : (t.spreadStartMonth ?? null),
+            spreadMonths: t.spreadStartMonth == null ? null : (t.spreadMonths ?? null),
+            spreadEndMonth:
+              t.spreadStartMonth == null || t.spreadMonths == null
+                ? null
+                : spreadEndMonth(t.spreadStartMonth, t.spreadMonths),
             skippedAt: t.skippedAt,
             createdAt: t.createdAt,
           })),

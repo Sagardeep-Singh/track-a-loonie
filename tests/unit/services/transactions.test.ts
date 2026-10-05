@@ -601,3 +601,169 @@ describe('FrontendTransaction reimbursement fields', () => {
     expect(result.reimbursementExpectedAmount).toBeNull();
   });
 });
+
+describe('transaction spreading', () => {
+  const spreadExpenseTx = {
+    ...baseTx,
+    type: 'EXPENSE' as const,
+    isPayment: false,
+    amount: 3600,
+    date: new Date('2026-06-15'),
+    spreadStartMonth: 202601,
+    spreadMonths: 12,
+  };
+  const existingExpense = {
+    ...baseExisting,
+    type: 'EXPENSE' as const,
+    amount: 3600,
+    date: new Date('2026-06-15'),
+    spreadStartMonth: null as number | null,
+    spreadMonths: null as number | null,
+  };
+
+  it('writes all three spread columns on create, deriving the end month', async () => {
+    prismaMock.transaction.create.mockResolvedValue(spreadExpenseTx);
+
+    const result = await createTransaction('user-1', {
+      accountId: 'acc-1',
+      amount: 3600,
+      type: 'EXPENSE',
+      date: new Date('2026-06-15'),
+      isPayment: false,
+      isTransfer: false,
+      isReimbursable: false,
+      spreadStartMonth: 202601,
+      spreadMonths: 12,
+    });
+
+    expect(prismaMock.transaction.create.mock.calls[0][0].data).toMatchObject({
+      spreadStartMonth: 202601,
+      spreadMonths: 12,
+      spreadEndMonth: 202612,
+    });
+    expect(result).toMatchObject({
+      spreadStartMonth: 202601,
+      spreadMonths: 12,
+      spreadMonthlyAmount: '300.00',
+    });
+  });
+
+  it('writes all three as null on create when not spread', async () => {
+    prismaMock.transaction.create.mockResolvedValue({ ...baseTx });
+
+    const result = await createTransaction('user-1', {
+      accountId: 'acc-1',
+      amount: 12,
+      type: 'EXPENSE',
+      date: new Date('2026-03-16'),
+      isPayment: false,
+      isTransfer: false,
+      isReimbursable: false,
+    });
+
+    expect(prismaMock.transaction.create.mock.calls[0][0].data).toMatchObject({
+      spreadStartMonth: null,
+      spreadMonths: null,
+      spreadEndMonth: null,
+    });
+    expect(result.spreadMonthlyAmount).toBeNull();
+  });
+
+  it('sets a spread on update', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ ...existingExpense });
+    prismaMock.transaction.update.mockResolvedValue(spreadExpenseTx);
+
+    await updateTransaction('user-1', 'tx-1', { spreadStartMonth: 202607, spreadMonths: 12 });
+
+    expect(prismaMock.transaction.update.mock.calls[0][0].data).toMatchObject({
+      spreadStartMonth: 202607,
+      spreadMonths: 12,
+      spreadEndMonth: 202706,
+    });
+  });
+
+  it('clears all three columns when the spread is turned off', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      ...existingExpense,
+      spreadStartMonth: 202601,
+      spreadMonths: 12,
+    });
+    prismaMock.transaction.update.mockResolvedValue({ ...baseTx });
+
+    await updateTransaction('user-1', 'tx-1', { spreadStartMonth: null, spreadMonths: null });
+
+    expect(prismaMock.transaction.update.mock.calls[0][0].data).toMatchObject({
+      spreadStartMonth: null,
+      spreadMonths: null,
+      spreadEndMonth: null,
+    });
+  });
+
+  it('leaves the spread columns untouched on an unrelated edit', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      ...existingExpense,
+      spreadStartMonth: 202601,
+      spreadMonths: 12,
+    });
+    prismaMock.transaction.update.mockResolvedValue(spreadExpenseTx);
+
+    await updateTransaction('user-1', 'tx-1', { payee: 'City of Toronto' });
+
+    const data = prismaMock.transaction.update.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty('spreadStartMonth');
+    expect(data).not.toHaveProperty('spreadEndMonth');
+  });
+
+  it('rejects turning a spread expense into income', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      ...existingExpense,
+      spreadStartMonth: 202601,
+      spreadMonths: 12,
+    });
+
+    await expect(updateTransaction('user-1', 'tx-1', { type: 'INCOME' })).rejects.toBeInstanceOf(
+      ServiceValidationError,
+    );
+    expect(prismaMock.transaction.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects marking a spread expense reimbursable, or a transfer', async () => {
+    const spreadExisting = { ...existingExpense, spreadStartMonth: 202601, spreadMonths: 12 };
+    prismaMock.transaction.findFirst.mockResolvedValue(spreadExisting);
+    await expect(
+      updateTransaction('user-1', 'tx-1', {
+        isReimbursable: true,
+        reimbursementExpectedAmount: 100,
+      }),
+    ).rejects.toBeInstanceOf(ServiceValidationError);
+
+    prismaMock.transaction.findFirst.mockResolvedValue(spreadExisting);
+    await expect(updateTransaction('user-1', 'tx-1', { isTransfer: true })).rejects.toBeInstanceOf(
+      ServiceValidationError,
+    );
+  });
+
+  it('rejects spreading an existing reimbursable expense', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      ...existingExpense,
+      isReimbursable: true,
+      reimbursementExpectedAmount: 100,
+    });
+
+    await expect(
+      updateTransaction('user-1', 'tx-1', { spreadStartMonth: 202601, spreadMonths: 12 }),
+    ).rejects.toBeInstanceOf(ServiceValidationError);
+  });
+
+  it('rejects moving the date so the spread start is over 24 months away', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      ...existingExpense,
+      spreadStartMonth: 202601,
+      spreadMonths: 12,
+    });
+
+    await expect(
+      updateTransaction('user-1', 'tx-1', { date: new Date('2028-06-15') }),
+    ).rejects.toBeInstanceOf(ServiceValidationError);
+  });
+});

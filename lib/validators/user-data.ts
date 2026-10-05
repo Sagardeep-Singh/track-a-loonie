@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SPREAD_MAX_MONTHS, SPREAD_MIN_MONTHS } from '@/lib/spread';
 
 export const USER_DATA_FORMAT_VERSION = 1;
 /** Enforced by the route before this schema even runs — see the byte-length
@@ -65,6 +66,24 @@ const transactionSchema = z.strictObject({
   isReimbursable: z.boolean(),
   reimbursementExpectedAmount: unsignedDecimal.nullable(),
   reimbursementCompletedAt: z.coerce.date().nullable(),
+  // optional so exports from before spreading existed still import;
+  // spreadEndMonth is never in the file, it's recomputed on import
+  spreadStartMonth: z
+    .number()
+    .int()
+    .refine(
+      (month) => month >= 190001 && month <= 999912 && month % 100 >= 1 && month % 100 <= 12,
+      'Invalid spread start month.',
+    )
+    .nullable()
+    .default(null),
+  spreadMonths: z
+    .number()
+    .int()
+    .min(SPREAD_MIN_MONTHS)
+    .max(SPREAD_MAX_MONTHS)
+    .nullable()
+    .default(null),
   skippedAt: z.coerce.date().nullable(),
   createdAt: z.coerce.date(),
 });
@@ -237,6 +256,24 @@ export const userDataFileSchema = z
           code: 'custom',
           path: path('isReimbursable'),
           message: 'A reimbursable expense cannot also be a transfer or a card payment.',
+        });
+      }
+      if ((t.spreadStartMonth === null) !== (t.spreadMonths === null)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: path('spreadMonths'),
+          message: 'spreadStartMonth and spreadMonths must both be set or both be null.',
+        });
+      }
+      if (
+        t.spreadMonths !== null &&
+        (t.type !== 'EXPENSE' || t.isTransfer || t.isPayment || t.isReimbursable)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: path('spreadMonths'),
+          message:
+            'Only a plain expense can be spread (not income, a transfer, a card payment or reimbursable).',
         });
       }
       if (t.reimbursementCompletedAt !== null && !t.isReimbursable) {

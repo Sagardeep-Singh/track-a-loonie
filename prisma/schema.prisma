@@ -145,6 +145,18 @@ model Transaction {
   /// (linked total >= expected) reverts to PARTIAL/PENDING if links shrink; a
   /// manual one only reverts when the user explicitly un-marks it
   reimbursementCompletedAt DateTime?
+  /// first YYYYMM month (same idiom as Budget.month) this EXPENSE's cost is
+  /// spread over for reporting. Invariant: all three spread* columns are set
+  /// together or all null. Only budgets/overview/trends read them; the ledger,
+  /// balances and the Transactions page keep using amount/date as-is.
+  /// Mutually exclusive with isTransfer/isPayment/isReimbursable.
+  spreadStartMonth Int?
+  /// number of months (2-24) the amount is split evenly across, remainder
+  /// cents going to the earliest months. null when not spread
+  spreadMonths     Int?
+  /// last YYYYMM month of the spread, denormalized from start + months so an
+  /// overlap query can use plain integer comparisons (YYYYMM isn't linear)
+  spreadEndMonth   Int?
   skippedAt     DateTime?
   createdAt     DateTime        @default(now())
 
@@ -161,6 +173,7 @@ model Transaction {
   @@index([importBatchId])
   @@index([transferMatchId])
   @@index([userId, isReimbursable])
+  @@index([userId, spreadEndMonth])
 }
 
 /// one income transaction contributing `amount` toward one reimbursable

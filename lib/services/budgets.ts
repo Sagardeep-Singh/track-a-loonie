@@ -2,6 +2,7 @@ import { monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { ServiceValidationError } from '@/lib/services/common';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
+import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 import type { CreateBudgetInput, UpdateBudgetInput } from '@/lib/validators/budgets';
 
 export type FrontendBudget = {
@@ -44,7 +45,7 @@ export const listBudgets = async (userId: string, month: number): Promise<Fronte
     });
   };
 
-  const [rows, spentByCategory, reimbursedExpenses] = await Promise.all([
+  const [rows, spentByCategory, reimbursedExpenses, spreadShares] = await Promise.all([
     budgetRows(),
     prisma.transaction.groupBy({
       by: ['categoryId'],
@@ -55,6 +56,9 @@ export const listBudgets = async (userId: string, month: number): Promise<Fronte
         userId,
         type: 'EXPENSE',
         isTransfer: false,
+        // a spread expense counts through its monthly shares below, not its
+        // own date
+        spreadMonths: null,
         date: { gte: start, lt: end },
         categoryId: { not: null },
       },
@@ -63,6 +67,7 @@ export const listBudgets = async (userId: string, month: number): Promise<Fronte
     // net reimbursements out of spend, attributed to the *expense's* month —
     // a reimbursement received later still reduces the month the money was spent in
     listReimbursedAmountsByExpenseDate(userId, start, end),
+    listSpreadSharesInRange(userId, month, month),
   ]);
 
   const effectiveByCategory = new Map<string, (typeof rows)[number]>();
@@ -75,6 +80,11 @@ export const listBudgets = async (userId: string, month: number): Promise<Fronte
   const spentMap = new Map(
     spentByCategory.map((row) => [row.categoryId as string, Number(row._sum.amount ?? 0)]),
   );
+
+  for (const share of spreadShares) {
+    if (!share.categoryId) continue;
+    spentMap.set(share.categoryId, (spentMap.get(share.categoryId) ?? 0) + Number(share.amount));
+  }
 
   const reimbursedByCategory = new Map<string, number>();
   for (const r of reimbursedExpenses) {

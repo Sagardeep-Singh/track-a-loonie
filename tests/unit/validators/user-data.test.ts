@@ -286,4 +286,71 @@ describe('userDataFileSchema', () => {
       expect(userDataFileSchema.safeParse(file).success).toBe(true);
     });
   });
+
+  describe('spread fields', () => {
+    const withSpread = (patch: Record<string, unknown>): unknown => {
+      const file = validFile() as {
+        data: { transactions: Record<string, unknown>[]; reimbursementLinks: unknown[] };
+      };
+      Object.assign(file.data.transactions[0], {
+        isReimbursable: false,
+        reimbursementExpectedAmount: null,
+        ...patch,
+      });
+      file.data.transactions[0].id = 'tx-plain';
+      file.data.reimbursementLinks = [];
+      return file;
+    };
+
+    it('defaults missing spread fields to null for older exports', () => {
+      const result = userDataFileSchema.safeParse(validFile());
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.data.transactions[0].spreadStartMonth).toBeNull();
+        expect(result.data.data.transactions[0].spreadMonths).toBeNull();
+      }
+    });
+
+    it('accepts a spread expense', () => {
+      const result = userDataFileSchema.safeParse(
+        withSpread({ spreadStartMonth: 202601, spreadMonths: 12 }),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects half a spread pair', () => {
+      expect(userDataFileSchema.safeParse(withSpread({ spreadStartMonth: 202601 })).success).toBe(
+        false,
+      );
+    });
+
+    it('rejects a spread on income or a reimbursable expense', () => {
+      expect(
+        userDataFileSchema.safeParse(
+          withSpread({ type: 'INCOME', spreadStartMonth: 202601, spreadMonths: 12 }),
+        ).success,
+      ).toBe(false);
+      expect(
+        userDataFileSchema.safeParse(
+          withSpread({
+            isReimbursable: true,
+            reimbursementExpectedAmount: '10.00',
+            spreadStartMonth: 202601,
+            spreadMonths: 12,
+          }),
+        ).success,
+      ).toBe(false);
+    });
+
+    it('rejects an out-of-range month count or a malformed start month', () => {
+      expect(
+        userDataFileSchema.safeParse(withSpread({ spreadStartMonth: 202601, spreadMonths: 25 }))
+          .success,
+      ).toBe(false);
+      expect(
+        userDataFileSchema.safeParse(withSpread({ spreadStartMonth: 202613, spreadMonths: 12 }))
+          .success,
+      ).toBe(false);
+    });
+  });
 });

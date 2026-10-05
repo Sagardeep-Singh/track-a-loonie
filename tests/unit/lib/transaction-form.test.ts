@@ -38,6 +38,8 @@ describe('buildTransactionPayload', () => {
       isTransfer: false,
       isReimbursable: false,
       reimbursementExpectedAmount: undefined,
+      spreadStartMonth: null,
+      spreadMonths: null,
     });
   });
 
@@ -134,5 +136,50 @@ describe('buildTransactionPayload', () => {
       reimbursementExpectedAmount: '',
     });
     expect(payload.reimbursementExpectedAmount).toBeUndefined();
+  });
+});
+
+describe('buildTransactionPayload spread', () => {
+  const spreadable = {
+    ...base,
+    canBeReimbursable: true,
+    canBeSpread: true,
+    isSpread: true,
+    spreadStartMonth: '2026-01',
+    spreadMonths: '12',
+  };
+
+  it('sends the spread window as YYYYMM and a month count', () => {
+    const payload = buildTransactionPayload(spreadable);
+    expect(payload.spreadStartMonth).toBe(202601);
+    expect(payload.spreadMonths).toBe(12);
+  });
+
+  it('sends explicit nulls when the spread is off, so an edit can clear one', () => {
+    const payload = buildTransactionPayload({ ...spreadable, isSpread: false });
+    expect(payload.spreadStartMonth).toBeNull();
+    expect(payload.spreadMonths).toBeNull();
+  });
+
+  it('forces the spread off when the combination cannot take it, even with stale state', () => {
+    const payload = buildTransactionPayload({ ...spreadable, canBeSpread: false });
+    expect(payload.spreadMonths).toBeNull();
+  });
+
+  it('never sends a spread alongside reimbursable', () => {
+    const payload = buildTransactionPayload({
+      ...spreadable,
+      isReimbursable: true,
+      reimbursementExpectedAmount: '5',
+    });
+    expect(payload.isReimbursable).toBe(true);
+    expect(payload.spreadStartMonth).toBeNull();
+    expect(payload.spreadMonths).toBeNull();
+  });
+
+  it('defaults to no spread when the spread fields are omitted', () => {
+    const payload = buildTransactionPayload(base);
+    expect(payload.spreadStartMonth).toBeNull();
+    expect(payload.spreadMonths).toBeNull();
   });
 });

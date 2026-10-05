@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { monthOfDate, monthsBetween } from '@/lib/date';
 import { parseDateParam } from '@/lib/period-selection';
+import { SPREAD_MAX_MONTHS, SPREAD_MAX_START_OFFSET, SPREAD_MIN_MONTHS } from '@/lib/spread';
 import { TRANSACTIONS_PAGE_SIZE } from '@/lib/transactions/transactions-page-query';
 
 export const transactionTypeSchema = z.enum(['INCOME', 'EXPENSE']);
@@ -17,6 +19,21 @@ const transactionFieldsSchema = z.object({
   isReimbursable: z.coerce.boolean().default(false),
   reimbursementExpectedAmount: z.coerce.number().positive().nullable().optional(),
   reimbursementCompleted: z.coerce.boolean().optional(),
+  spreadStartMonth: z.coerce
+    .number()
+    .int()
+    .min(190001)
+    .max(299912)
+    .refine((m) => m % 100 >= 1 && m % 100 <= 12, 'Invalid month')
+    .nullable()
+    .optional(),
+  spreadMonths: z.coerce
+    .number()
+    .int()
+    .min(SPREAD_MIN_MONTHS, `Spread over at least ${SPREAD_MIN_MONTHS} months`)
+    .max(SPREAD_MAX_MONTHS, `Spread over at most ${SPREAD_MAX_MONTHS} months`)
+    .nullable()
+    .optional(),
 });
 
 /**
@@ -90,10 +107,86 @@ const refineReimbursable = (
   }
 };
 
-export const createTransactionSchema = transactionFieldsSchema.superRefine(refineReimbursable);
+/**
+ * Payload-only spread checks, same shape rules as `refineReimbursable`: every
+ * field may be `undefined` on a partial update. A spread is "set" when
+ * `spreadMonths` is a number; both spread fields travel together. The merged
+ * state on a partial PATCH is re-checked in the service.
+ */
+const refineSpread = (
+  v: {
+    type?: 'INCOME' | 'EXPENSE';
+    date?: Date;
+    isTransfer?: boolean;
+    isPayment?: boolean;
+    isReimbursable?: boolean;
+    spreadStartMonth?: number | null;
+    spreadMonths?: number | null;
+  },
+  ctx: z.RefinementCtx,
+): void => {
+  const startSet = v.spreadStartMonth != null;
+  const monthsSet = v.spreadMonths != null;
+  if (v.spreadStartMonth !== undefined || v.spreadMonths !== undefined) {
+    if (startSet !== monthsSet) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [startSet ? 'spreadMonths' : 'spreadStartMonth'],
+        message: 'Spread needs both a start month and a number of months',
+      });
+      return;
+    }
+  }
+  if (!monthsSet) return;
+
+  if (v.type !== undefined && v.type !== 'EXPENSE') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['spreadMonths'],
+      message: 'Only an expense can be spread',
+    });
+  }
+  if (v.isTransfer === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['spreadMonths'],
+      message: 'A transfer cannot be spread',
+    });
+  }
+  if (v.isPayment === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['spreadMonths'],
+      message: 'A card payment cannot be spread',
+    });
+  }
+  if (v.isReimbursable === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['spreadMonths'],
+      message: 'A reimbursable expense cannot also be spread',
+    });
+  }
+  if (
+    v.date !== undefined &&
+    !Number.isNaN(v.date.getTime()) &&
+    Math.abs(monthsBetween(monthOfDate(v.date), v.spreadStartMonth!)) > SPREAD_MAX_START_OFFSET
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['spreadStartMonth'],
+      message: `The spread must start within ${SPREAD_MAX_START_OFFSET} months of the transaction date`,
+    });
+  }
+};
+
+export const createTransactionSchema = transactionFieldsSchema
+  .superRefine(refineReimbursable)
+  .superRefine(refineSpread);
 export const updateTransactionSchema = transactionFieldsSchema
   .partial()
-  .superRefine(refineReimbursable);
+  .superRefine(refineReimbursable)
+  .superRefine(refineSpread);
 
 export const listTransactionsQuerySchema = z.object({
   accountId: z.string().optional(),
