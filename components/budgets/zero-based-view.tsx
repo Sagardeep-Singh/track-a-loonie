@@ -308,7 +308,7 @@ export const ZeroBasedView = ({
                     </label>
                     <Input
                       id={`assigned-${c.categoryId}`}
-                      className="w-28 rounded-[9px] text-right font-mono"
+                      className="w-28 rounded-[9px] text-right font-mono max-sm:[appearance:textfield] max-sm:[&::-webkit-inner-spin-button]:appearance-none max-sm:[&::-webkit-outer-spin-button]:appearance-none"
                       type="number"
                       step="0.01"
                       inputMode="decimal"
@@ -326,35 +326,42 @@ export const ZeroBasedView = ({
                       }}
                     />
                   </div>
-                  <div className="text-ink-muted font-mono text-[13px] tabular-nums sm:text-right">
-                    <span className="sm:hidden">Spent </span>
-                    {money(c.activity)}
-                  </div>
-                  <div className="flex items-center justify-end gap-2 sm:contents">
-                    <span
-                      data-testid="zbb-available"
-                      className={cn(
-                        'justify-self-end rounded-full px-2.5 py-0.5 font-mono text-[13px] font-semibold tabular-nums',
-                        overspent
-                          ? 'bg-rose-soft text-rose'
-                          : available > 0
-                            ? 'bg-sky-soft text-sky'
-                            : 'bg-paper-sunk text-ink-muted',
-                      )}
-                    >
-                      {money(c.available)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => openMove(c)}
-                      className={cn(
-                        'inline-flex items-center justify-end gap-1 text-xs',
-                        overspent ? 'text-rose font-semibold' : 'text-ink-muted hover:text-iris',
-                      )}
-                    >
-                      <ArrowRightLeft size={14} />
-                      {overspent ? 'Cover' : 'Move'}
-                    </button>
+                  {/* Mobile: Spent and Left share the row under the name. Desktop
+                      flattens this wrapper so each lands in its own column. */}
+                  <div className="col-span-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 sm:contents">
+                    <div className="text-ink-muted font-mono text-[13px] tabular-nums sm:text-right">
+                      <span className="sm:hidden">Spent </span>
+                      {money(c.activity)}
+                    </div>
+                    <div className="ml-auto flex items-center justify-end gap-2 sm:contents">
+                      {/* no column headers on mobile, and Left matches Assigned
+                          until something is spent or carried in */}
+                      <span className="text-ink-muted font-mono text-[13px] sm:hidden">Left</span>
+                      <span
+                        data-testid="zbb-available"
+                        className={cn(
+                          'justify-self-end rounded-full px-2.5 py-0.5 font-mono text-[13px] font-semibold tabular-nums',
+                          overspent
+                            ? 'bg-rose-soft text-rose'
+                            : available > 0
+                              ? 'bg-sky-soft text-sky'
+                              : 'bg-paper-sunk text-ink-muted',
+                        )}
+                      >
+                        {money(c.available)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => openMove(c)}
+                        className={cn(
+                          'inline-flex items-center justify-end gap-1 text-xs',
+                          overspent ? 'text-rose font-semibold' : 'text-ink-muted hover:text-iris',
+                        )}
+                      >
+                        <ArrowRightLeft size={14} />
+                        {overspent ? 'Cover' : 'Move'}
+                      </button>
+                    </div>
                   </div>
                 </li>
               );
