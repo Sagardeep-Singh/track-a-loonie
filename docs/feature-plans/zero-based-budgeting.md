@@ -182,9 +182,9 @@ Rules enforced in the service (throw `ServiceValidationError`):
 - `assignToTargets`: for each category with a target, the top-up is
   `max(0, target - (carriedIn + assigned))`. If the total top-up exceeds Ready to Assign, nothing
   is written and the service throws with the shortfall, so the UI can explain it.
-- Activity aggregation uses one `$queryRaw` grouped by category and YYYYMM, scoped by `userId`
-  and the user's on-budget account ids, with a self-join on `transferMatchId` to apply the
-  transfer rule. Bounded to `date >= start of zbbStartMonth`.
+- Activity aggregation reads on-budget expenses since the start month, scoped by `userId` and
+  the user's on-budget account ids, plus a lookup of transfer counterparts by
+  `transferMatchId` to apply the transfer rule.
 
 Existing services touched:
 
@@ -276,18 +276,37 @@ E2E (`tests/e2e/zero-based-budgeting.spec.ts`, Playwright):
 - Error states: over-assigning shows the negative banner; assign to targets with insufficient
   funds shows the shortfall.
 
+## Implementation notes
+
+- Activity is aggregated in TypeScript from a `findMany` over on-budget expenses since the start
+  month (plus one counterpart lookup for transfers), not `$queryRaw`. It keeps the service
+  testable with the existing Prisma mocks; revisit with a grouped query if a user's history
+  makes it slow.
+- Targets are read-only in zero-based mode. They come from spending limits, which are edited in
+  limits mode. The page says so.
+- Edge case accepted: a reimbursement paid into an off-budget account still returns money to
+  the expense's category, but doesn't raise the on-budget balance, so Ready to Assign drops by
+  that amount until the user moves the money.
+- `lib/date.ts` gained `shiftMonth` and `monthOfDate`. `trends.ts` keeps its private copy of
+  `shiftMonth` to avoid an unrelated refactor.
+
+## Follow-ups
+
+- Edit targets directly from the zero-based view.
+- YNAB-style credit card payment categories (non-goal for now).
+
 ## Checklist
 
-- [ ] Schema: `BudgetMode`, `UserBudgetSettings`, `CategoryAssignment`, `Account.onBudget`;
+- [x] Schema: `BudgetMode`, `UserBudgetSettings`, `CategoryAssignment`, `Account.onBudget`;
       migration with SAVINGS backfill; `npm run prisma:generate`.
-- [ ] Pure math module with unit tests, including the 3-month example.
-- [ ] `zeroBased.ts` service: settings, month read, activity query, assign, move, targets.
-- [ ] Service unit tests per the test plan.
-- [ ] Validators and route handlers.
-- [ ] Accounts: `onBudget` in service, validator, form and badge.
-- [ ] Settings: Budgeting style section with enable flow.
-- [ ] Budgets page: mode switch, `ZeroBasedView`, move money dialog, targets, notices, mobile.
-- [ ] Overview: budget rings in ZBB mode.
-- [ ] Data export/import v2 with v1 compatibility.
-- [ ] E2E spec.
-- [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`.
+- [x] Pure math module with unit tests, including the 3-month example.
+- [x] `zeroBased.ts` service: settings, month read, activity query, assign, move, targets.
+- [x] Service unit tests per the test plan.
+- [x] Validators and route handlers.
+- [x] Accounts: `onBudget` in service, validator, form and badge.
+- [x] Settings: Budgeting style section with enable flow.
+- [x] Budgets page: mode switch, `ZeroBasedView`, move money dialog, targets, notices, mobile.
+- [x] Overview: budget rings in ZBB mode.
+- [x] Data export/import v2 with v1 compatibility.
+- [x] E2E spec.
+- [x] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`.

@@ -1,6 +1,6 @@
 import { daysInMonth as daysInMonthOf, monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
-import { listBudgets } from '@/lib/services/budgets';
+import { listBudgetsForMode } from '@/lib/services/zeroBased';
 import { getCategorizeQueueStats } from '@/lib/services/categorize';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
 import { getStatementPeriod } from '@/lib/statement';
@@ -107,7 +107,7 @@ export const getOverviewData = async (
   const todayOfMonth = isCurrentMonth ? now.getUTCDate() : daysInMonth;
 
   const [budgets, transactions, cardAccount, reimbursedExpenses] = await Promise.all([
-    listBudgets(userId, month),
+    listBudgetsForMode(userId, month),
     prisma.transaction.findMany({
       where: { userId, date: { gte: start, lt: end } },
       include: {

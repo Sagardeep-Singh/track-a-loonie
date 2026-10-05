@@ -4,6 +4,7 @@ import { useSyncExternalStore } from 'react';
 import { ChangePasswordForm } from '@/components/settings/change-password-form';
 import { RemindersSection } from '@/components/settings/reminders-section';
 import { AiCategorizationSection } from '@/components/settings/ai-categorization-section';
+import { BudgetingSection } from '@/components/settings/budgeting-section';
 import { ExportDataCard } from '@/components/settings/export-data-card';
 import { ImportDataCard } from '@/components/settings/import-data-card';
 import { DeleteAccountCard } from '@/components/settings/delete-account-card';
@@ -11,6 +12,8 @@ import { pillGroup, pillOption } from '@/components/settings/pills';
 import type { FrontendReminderPreference } from '@/lib/services/reminders';
 import type { FrontendPushSubscription } from '@/lib/services/pushSubscriptions';
 import type { AiModelsResult, FrontendAiSettings } from '@/lib/services/aiSettings';
+import type { FrontendAccount } from '@/lib/services/accounts';
+import type { FrontendBudgetSettings } from '@/lib/services/zeroBased';
 import {
   APPEARANCES,
   PALETTES,
@@ -40,6 +43,8 @@ export const SettingsView = ({
   pushDevices,
   aiSettings,
   aiModels,
+  budgetSettings,
+  accounts,
 }: {
   email: string;
   hasPassword: boolean;
@@ -49,6 +54,8 @@ export const SettingsView = ({
   pushDevices: FrontendPushSubscription[];
   aiSettings: FrontendAiSettings;
   aiModels: AiModelsResult;
+  budgetSettings: FrontendBudgetSettings;
+  accounts: FrontendAccount[];
 }): React.ReactElement => {
   const palette = useSyncExternalStore(
     subscribeToPreferences,
@@ -119,6 +126,8 @@ export const SettingsView = ({
           </div>
         </div>
       </div>
+
+      <BudgetingSection settings={budgetSettings} accounts={accounts} />
 
       <RemindersSection
         available={remindersAvailable}

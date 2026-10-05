@@ -8,6 +8,7 @@ export const createAccountSchema = z
     type: accountTypeSchema,
     startingBalance: z.coerce.number().finite().default(0),
     statementDay: z.coerce.number().int().min(1).max(28).nullable().optional(),
+    onBudget: z.boolean().optional(),
   })
   .refine((data) => data.type === 'CREDIT_CARD' || !data.statementDay, {
     message: 'statementDay only applies to credit card accounts',
@@ -22,6 +23,7 @@ export const updateAccountSchema = z.object({
   type: accountTypeSchema.optional(),
   startingBalance: z.coerce.number().finite().optional(),
   statementDay: z.coerce.number().int().min(1).max(28).nullable().optional(),
+  onBudget: z.boolean().optional(),
 });
 
 export type CreateAccountInput = z.infer<typeof createAccountSchema>;
