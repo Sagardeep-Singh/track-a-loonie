@@ -249,6 +249,16 @@
   }
 }
 
+/*
+ * Staggered entrance for card grids: set `--i` to the card's index. Plain CSS
+ * (not motion) on purpose, so it plays straight from the server HTML instead
+ * of holding cards invisible until JS hydrates.
+ */
+.stagger-item {
+  animation: fade-up 0.35s ease-out both;
+  animation-delay: calc(min(var(--i, 0), 8) * 60ms);
+}
+
 @keyframes grow-bar {
   from {
     width: 0%;

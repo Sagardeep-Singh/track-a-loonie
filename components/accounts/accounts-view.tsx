@@ -98,7 +98,7 @@ export const AccountsView = ({
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {initialAccounts.map((account) => {
+        {initialAccounts.map((account, index) => {
           const balance = Number(account.balance);
           const isCreditCard = account.type === 'CREDIT_CARD';
           const owing = isCreditCard && balance < 0;
@@ -106,8 +106,9 @@ export const AccountsView = ({
           return (
             <div
               key={account.id}
+              style={{ '--i': index } as React.CSSProperties}
               className={cn(
-                'bg-paper-raised rounded-2xl border p-5.5',
+                'stagger-item bg-paper-raised rounded-2xl border p-5.5',
                 noStartingBalance ? 'border-iris/35' : 'border-line',
               )}
             >

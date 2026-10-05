@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { AnimatePresence, m } from 'framer-motion';
 import { Check, CheckCheck, SkipForward } from 'lucide-react';
 import { patchJSON, postJSON, type ApiResult } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/field';
 import { Toast } from '@/components/ui/toast';
+import { listItemMotion } from '@/lib/motion/tokens';
 import { SuggestAiButton } from '@/components/categorize/suggest-ai-button';
 import type { CategorizeProgress, CategorizeQueueRow } from '@/lib/services/categorize';
 import type { FrontendCategory } from '@/lib/services/categories';
@@ -245,9 +247,11 @@ export const CategorizeView = ({
         <div className="border-line bg-paper-raised rounded-[18px] border p-10 text-center">
           <p className="text-ink-muted text-sm">Nothing left to categorize. Nice.</p>
         </div>
-        {toast && (
-          <Toast message={toast.message} onUndo={toast.undo} onDismiss={() => setToast(null)} />
-        )}
+        <AnimatePresence>
+          {toast && (
+            <Toast message={toast.message} onUndo={toast.undo} onDismiss={() => setToast(null)} />
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -305,127 +309,130 @@ export const CategorizeView = ({
           </div>
         )
       ) : (
-        <div className="mt-5 flex flex-col gap-3">
-          {payeeGroups.slice(0, visibleGroupCount).map((group) => {
-            const showMore = groupMore[group.payee] ?? false;
-            const chipCategories = showMore ? categories : categories.slice(0, 3);
-            // An AI suggestion lands here exactly like a chip tap would: it
-            // pre-selects, it does not apply. "Categorize all N" is still the
-            // user's explicit accept.
-            const chosenId = groupChoice[group.payee] ?? aiSuggestions[group.rows[0].id] ?? null;
-            return (
-              <div
-                key={group.payee}
-                data-testid="payee-group-card"
-                className="border-line bg-paper-raised rounded-[18px] border p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-base font-semibold tracking-[-0.01em]">
-                      {group.payee}
+        <div className="relative mt-5 flex flex-col gap-3">
+          <AnimatePresence mode="popLayout" initial={false}>
+            {payeeGroups.slice(0, visibleGroupCount).map((group) => {
+              const showMore = groupMore[group.payee] ?? false;
+              const chipCategories = showMore ? categories : categories.slice(0, 3);
+              // An AI suggestion lands here exactly like a chip tap would: it
+              // pre-selects, it does not apply. "Categorize all N" is still the
+              // user's explicit accept.
+              const chosenId = groupChoice[group.payee] ?? aiSuggestions[group.rows[0].id] ?? null;
+              return (
+                <m.div
+                  key={group.payee}
+                  {...listItemMotion}
+                  data-testid="payee-group-card"
+                  className="border-line bg-paper-raised rounded-[18px] border p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-semibold tracking-[-0.01em]">
+                        {group.payee}
+                      </div>
+                      <div className="text-ink-muted mt-0.5 text-xs">
+                        {group.rows.length} transaction{group.rows.length === 1 ? '' : 's'} ·{' '}
+                        {group.meta}
+                      </div>
                     </div>
-                    <div className="text-ink-muted mt-0.5 text-xs">
-                      {group.rows.length} transaction{group.rows.length === 1 ? '' : 's'} ·{' '}
-                      {group.meta}
-                    </div>
+                    <span className="text-rose font-mono text-sm tabular-nums">
+                      -{group.totalAmount.toFixed(2)}
+                    </span>
                   </div>
-                  <span className="text-rose font-mono text-sm tabular-nums">
-                    -{group.totalAmount.toFixed(2)}
-                  </span>
-                </div>
 
-                {group.suggestedCategoryId ? (
-                  <>
-                    <div className="bg-paper mt-3.5 flex items-center gap-2 rounded-xl px-3 py-2.5">
-                      <span className="bg-sky-soft text-sky rounded-full px-2 py-1 text-[10px] font-semibold tracking-[0.05em] uppercase">
-                        Rule match
-                      </span>
-                      <span className="text-[13.5px] font-medium">
-                        {group.suggestedCategoryName}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={pending}
-                      onClick={() => void confirmGroup(group, group.suggestedCategoryId!)}
-                      className="bg-iris text-paper-raised mt-3 block w-full rounded-full py-2.75 text-[14.5px] font-semibold disabled:opacity-50"
-                    >
-                      Categorize all {group.rows.length} as {group.suggestedCategoryName}
-                    </button>
-                    <div className="mt-3.5 flex items-start gap-2.5">
-                      <span className="bg-iris mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md">
-                        <Check size={12} className="text-paper-raised" strokeWidth={2.5} />
-                      </span>
-                      <span className="text-ink-muted text-[12.5px] leading-snug">
-                        Keeps matching future {group.payee} imports to {group.suggestedCategoryName}{' '}
-                        automatically.
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => reviewGroupIndividually()}
-                      className="text-iris mt-3 block w-full py-2 text-center text-[13px] font-medium"
-                    >
-                      Review these {group.rows.length} individually
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-ink-muted mt-2.5 text-[12.5px] leading-snug">
-                      {group.why ?? 'No rule matches this payee. Pick a category for the batch.'}
-                    </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {renderSuggest(group.rows[0].id, false)}
-                    </div>
-                    {renderAiResult(group.rows[0].id)}
-                    <div className="mt-3.5 flex flex-wrap gap-2">
-                      {chipCategories.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => setGroupChoice((g) => ({ ...g, [group.payee]: c.id }))}
-                          className={cn(
-                            'rounded-full border px-3.5 py-2 text-[13.5px]',
-                            chosenId === c.id
-                              ? 'border-iris bg-iris-soft text-iris font-medium'
-                              : 'border-line text-ink',
-                          )}
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                      {!showMore && categories.length > 3 && (
-                        <button
-                          type="button"
-                          onClick={() => setGroupMore((g) => ({ ...g, [group.payee]: true }))}
-                          className="border-line text-ink-muted rounded-full border px-3.5 py-2 text-[13.5px]"
-                        >
-                          More…
-                        </button>
-                      )}
-                    </div>
-                    <div className="mt-3.5 flex gap-2.5">
+                  {group.suggestedCategoryId ? (
+                    <>
+                      <div className="bg-paper mt-3.5 flex items-center gap-2 rounded-xl px-3 py-2.5">
+                        <span className="bg-sky-soft text-sky rounded-full px-2 py-1 text-[10px] font-semibold tracking-[0.05em] uppercase">
+                          Rule match
+                        </span>
+                        <span className="text-[13.5px] font-medium">
+                          {group.suggestedCategoryName}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => void confirmGroup(group, group.suggestedCategoryId!)}
+                        className="bg-iris text-paper-raised mt-3 block w-full rounded-full py-2.75 text-[14.5px] font-semibold disabled:opacity-50"
+                      >
+                        Categorize all {group.rows.length} as {group.suggestedCategoryName}
+                      </button>
+                      <div className="mt-3.5 flex items-start gap-2.5">
+                        <span className="bg-iris mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md">
+                          <Check size={12} className="text-paper-raised" strokeWidth={2.5} />
+                        </span>
+                        <span className="text-ink-muted text-[12.5px] leading-snug">
+                          Keeps matching future {group.payee} imports to{' '}
+                          {group.suggestedCategoryName} automatically.
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => reviewGroupIndividually()}
-                        className="border-line text-ink flex-1 rounded-full border py-3 text-[13.5px] font-medium"
+                        className="text-iris mt-3 block w-full py-2 text-center text-[13px] font-medium"
                       >
-                        Split individually
+                        Review these {group.rows.length} individually
                       </button>
-                      <button
-                        type="button"
-                        disabled={!chosenId || pending}
-                        onClick={() => chosenId && void confirmGroup(group, chosenId)}
-                        className="bg-iris text-paper-raised flex-[1.2] rounded-full py-3 text-[13.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Categorize all {group.rows.length}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-ink-muted mt-2.5 text-[12.5px] leading-snug">
+                        {group.why ?? 'No rule matches this payee. Pick a category for the batch.'}
+                      </p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {renderSuggest(group.rows[0].id, false)}
+                      </div>
+                      {renderAiResult(group.rows[0].id)}
+                      <div className="mt-3.5 flex flex-wrap gap-2">
+                        {chipCategories.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setGroupChoice((g) => ({ ...g, [group.payee]: c.id }))}
+                            className={cn(
+                              'rounded-full border px-3.5 py-2 text-[13.5px]',
+                              chosenId === c.id
+                                ? 'border-iris bg-iris-soft text-iris font-medium'
+                                : 'border-line text-ink',
+                            )}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                        {!showMore && categories.length > 3 && (
+                          <button
+                            type="button"
+                            onClick={() => setGroupMore((g) => ({ ...g, [group.payee]: true }))}
+                            className="border-line text-ink-muted rounded-full border px-3.5 py-2 text-[13.5px]"
+                          >
+                            More…
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-3.5 flex gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => reviewGroupIndividually()}
+                          className="border-line text-ink flex-1 rounded-full border py-3 text-[13.5px] font-medium"
+                        >
+                          Split individually
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!chosenId || pending}
+                          onClick={() => chosenId && void confirmGroup(group, chosenId)}
+                          className="bg-iris text-paper-raised flex-[1.2] rounded-full py-3 text-[13.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Categorize all {group.rows.length}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </m.div>
+              );
+            })}
+          </AnimatePresence>
           {visibleGroupCount < payeeGroups.length && (
             <button
               type="button"
@@ -444,158 +451,165 @@ export const CategorizeView = ({
           the default "by payee" mode uses the grouped batch cards above. */}
       <div
         className={cn(
-          'border-line bg-paper-raised mt-4 rounded-[18px] border px-6',
+          'border-line bg-paper-raised relative mt-4 rounded-[18px] border px-6',
           reviewOne ? 'hidden lg:block' : 'hidden',
         )}
       >
-        {visibleRows.map((row) => {
-          const aiChoice = aiSuggestions[row.id] ?? null;
-          return (
-            <div key={row.id} className="ledger-row py-4.5">
-              <div className="flex items-center gap-5">
-                <div className="w-[230px] min-w-0 shrink-0">
-                  <div className="truncate text-sm font-medium">{row.payee}</div>
-                  <div className="text-ink-muted mt-0.5 text-xs">{row.meta}</div>
-                </div>
-                <span className="text-rose w-24 shrink-0 text-right font-mono text-sm tabular-nums">
-                  -{row.amount}
-                </span>
-                <div className="text-ink-muted w-[250px] shrink-0 text-[12.5px] leading-snug">
-                  {row.why ?? 'No rule matches this transaction.'}
-                </div>
-                <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                  {!row.suggestedCategoryId && renderSuggest(row.id, true)}
-                  {/* Controlled, so an AI suggestion has somewhere to land
+        <AnimatePresence mode="popLayout" initial={false}>
+          {visibleRows.map((row) => {
+            const aiChoice = aiSuggestions[row.id] ?? null;
+            return (
+              <m.div key={row.id} {...listItemMotion} className="ledger-row py-4.5">
+                <div className="flex items-center gap-5">
+                  <div className="w-[230px] min-w-0 shrink-0">
+                    <div className="truncate text-sm font-medium">{row.payee}</div>
+                    <div className="text-ink-muted mt-0.5 text-xs">{row.meta}</div>
+                  </div>
+                  <span className="text-rose w-24 shrink-0 text-right font-mono text-sm tabular-nums">
+                    -{row.amount}
+                  </span>
+                  <div className="text-ink-muted w-[250px] shrink-0 text-[12.5px] leading-snug">
+                    {row.why ?? 'No rule matches this transaction.'}
+                  </div>
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    {!row.suggestedCategoryId && renderSuggest(row.id, true)}
+                    {/* Controlled, so an AI suggestion has somewhere to land
                     before it is accepted — exactly how a rule match already
                     pre-fills it. Picking any option still applies
                     immediately; there is no separate confirm step. */}
-                  <Select
-                    disabled={pending}
-                    className="border-line bg-paper rounded-full px-3 py-2 text-sm"
-                    onChange={(e) => {
-                      if (e.target.value) void confirm(row, e.target.value);
-                    }}
-                    value={aiChoice ?? row.suggestedCategoryId ?? ''}
-                  >
-                    {!row.suggestedCategoryId && !aiChoice && (
-                      <option value="" disabled>
-                        Choose category
-                      </option>
-                    )}
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </Select>
-                  {/* Only exists while an unaccepted AI suggestion is sitting in
+                    <Select
+                      disabled={pending}
+                      className="border-line bg-paper rounded-full px-3 py-2 text-sm"
+                      onChange={(e) => {
+                        if (e.target.value) void confirm(row, e.target.value);
+                      }}
+                      value={aiChoice ?? row.suggestedCategoryId ?? ''}
+                    >
+                      {!row.suggestedCategoryId && !aiChoice && (
+                        <option value="" disabled>
+                          Choose category
+                        </option>
+                      )}
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {/* Only exists while an unaccepted AI suggestion is sitting in
                     the select — re-picking the value already selected fires no
                     change event, so without this the row would have no way to
                     accept it. */}
-                  {aiChoice && (
+                    {aiChoice && (
+                      <Button
+                        type="button"
+                        onClick={() => void confirm(row, aiChoice)}
+                        icon={Check}
+                        loading={pending}
+                        className="px-3 py-2 text-[13px]"
+                      >
+                        Apply
+                      </Button>
+                    )}
                     <Button
                       type="button"
-                      onClick={() => void confirm(row, aiChoice)}
-                      icon={Check}
+                      variant="secondary"
+                      onClick={() => void skip(row)}
+                      icon={SkipForward}
                       loading={pending}
                       className="px-3 py-2 text-[13px]"
                     >
-                      Apply
+                      Skip
                     </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => void skip(row)}
-                    icon={SkipForward}
-                    loading={pending}
-                    className="px-3 py-2 text-[13px]"
-                  >
-                    Skip
-                  </Button>
+                  </div>
                 </div>
-              </div>
-              {renderAiResult(row.id)}
-            </div>
-          );
-        })}
+                {renderAiResult(row.id)}
+              </m.div>
+            );
+          })}
+        </AnimatePresence>
       </div>
 
       {/* Mobile: one card, category chips instead of a dropdown — tapping a
           chip confirms immediately (no separate confirm step), so
           reassigning is a single tap. The rule's suggestion (if any) sorts
           first and gets an accent ring so it's the easiest chip to reach. */}
-      <div className={cn('mt-4 flex flex-col gap-3', reviewOne ? 'lg:hidden' : 'hidden')}>
-        {visibleRows.map((row) => {
-          // A rule match wins the top slot; an AI suggestion takes it otherwise,
-          // so the accent chip always means "the suggestion for this row".
-          const highlightId = row.suggestedCategoryId ?? aiSuggestions[row.id] ?? null;
-          const sortedCategories = highlightId
-            ? [
-                ...categories.filter((c) => c.id === highlightId),
-                ...categories.filter((c) => c.id !== highlightId),
-              ]
-            : categories;
-          return (
-            <div
-              key={row.id}
-              data-testid="categorize-card-mobile"
-              className="border-line bg-paper-raised flex flex-col gap-4 rounded-[18px] border p-5"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-[15px] font-medium">{row.payee}</div>
-                  <div className="text-ink-muted mt-0.5 text-xs">{row.meta}</div>
-                </div>
-                <span className="text-rose shrink-0 font-mono text-base tabular-nums">
-                  -{row.amount}
-                </span>
-              </div>
-              <p className="text-ink-muted text-[12.5px] leading-snug">
-                {row.why ?? 'No rule matches this transaction.'}
-              </p>
-              {!row.suggestedCategoryId && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {renderSuggest(row.id, false)}
-                </div>
-              )}
-              {renderAiResult(row.id)}
-              <div className="flex flex-wrap gap-2">
-                {sortedCategories.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    disabled={pending}
-                    onClick={() => void confirm(row, c.id)}
-                    className={cn(
-                      'rounded-full border px-3.5 py-2 text-[13px] font-medium disabled:opacity-50',
-                      c.id === highlightId
-                        ? 'border-iris bg-iris-soft text-iris'
-                        : 'border-line text-ink',
-                    )}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => void skip(row)}
-                icon={SkipForward}
-                loading={pending}
-                className="justify-center py-2.5 text-[13px]"
+      <div className={cn('relative mt-4 flex flex-col gap-3', reviewOne ? 'lg:hidden' : 'hidden')}>
+        <AnimatePresence mode="popLayout" initial={false}>
+          {visibleRows.map((row) => {
+            // A rule match wins the top slot; an AI suggestion takes it otherwise,
+            // so the accent chip always means "the suggestion for this row".
+            const highlightId = row.suggestedCategoryId ?? aiSuggestions[row.id] ?? null;
+            const sortedCategories = highlightId
+              ? [
+                  ...categories.filter((c) => c.id === highlightId),
+                  ...categories.filter((c) => c.id !== highlightId),
+                ]
+              : categories;
+            return (
+              <m.div
+                key={row.id}
+                {...listItemMotion}
+                data-testid="categorize-card-mobile"
+                className="border-line bg-paper-raised flex flex-col gap-4 rounded-[18px] border p-5"
               >
-                Skip
-              </Button>
-            </div>
-          );
-        })}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-[15px] font-medium">{row.payee}</div>
+                    <div className="text-ink-muted mt-0.5 text-xs">{row.meta}</div>
+                  </div>
+                  <span className="text-rose shrink-0 font-mono text-base tabular-nums">
+                    -{row.amount}
+                  </span>
+                </div>
+                <p className="text-ink-muted text-[12.5px] leading-snug">
+                  {row.why ?? 'No rule matches this transaction.'}
+                </p>
+                {!row.suggestedCategoryId && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {renderSuggest(row.id, false)}
+                  </div>
+                )}
+                {renderAiResult(row.id)}
+                <div className="flex flex-wrap gap-2">
+                  {sortedCategories.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      disabled={pending}
+                      onClick={() => void confirm(row, c.id)}
+                      className={cn(
+                        'rounded-full border px-3.5 py-2 text-[13px] font-medium disabled:opacity-50',
+                        c.id === highlightId
+                          ? 'border-iris bg-iris-soft text-iris'
+                          : 'border-line text-ink',
+                      )}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void skip(row)}
+                  icon={SkipForward}
+                  loading={pending}
+                  className="justify-center py-2.5 text-[13px]"
+                >
+                  Skip
+                </Button>
+              </m.div>
+            );
+          })}
+        </AnimatePresence>
       </div>
 
-      {toast && (
-        <Toast message={toast.message} onUndo={toast.undo} onDismiss={() => setToast(null)} />
-      )}
+      <AnimatePresence>
+        {toast && (
+          <Toast message={toast.message} onUndo={toast.undo} onDismiss={() => setToast(null)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

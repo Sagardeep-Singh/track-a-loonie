@@ -1,6 +1,7 @@
 import type { TrendsCategory, TrendsCategoryMonth, TrendsMonth } from '@/lib/services/trends';
 import { currentMonthNumber, daysElapsedInMonth } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { GrowBar } from '@/components/motion/grow-bar';
 
 const money = (value: number): string =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -61,7 +62,7 @@ export const CategoryBreakdownBar = ({
         <p className="text-ink-muted py-10 text-center text-sm">No expenses in this range.</p>
       ) : (
         <div className="flex h-[160px] items-end gap-1.5 sm:gap-3">
-          {breakdown.map((monthBreakdown) => {
+          {breakdown.map((monthBreakdown, index) => {
             const monthLabel = months.find((m) => m.month === monthBreakdown.month)?.label ?? '';
             const total = totalByMonth.get(monthBreakdown.month) ?? 0;
             const barHeight = Math.round((total / maxTotal) * 100);
@@ -74,12 +75,15 @@ export const CategoryBreakdownBar = ({
                 key={monthBreakdown.month}
                 className="flex h-full min-w-0 flex-1 flex-col justify-end"
               >
-                <div
+                <GrowBar
+                  axis="height"
+                  size={`${barHeight}%`}
+                  index={index}
                   className={cn(
                     'flex flex-col justify-end gap-[2px] overflow-hidden rounded-t-[4px]',
                     isInProgress && 'opacity-55',
                   )}
-                  style={{ height: `${barHeight}%`, minHeight: total > 0 ? 2 : 0 }}
+                  style={{ minHeight: total > 0 ? 2 : 0 }}
                   title={`${monthLabel}${isInProgress ? ' (in progress)' : ''}: ${money(total)}`}
                 >
                   {monthBreakdown.segments
@@ -98,7 +102,7 @@ export const CategoryBreakdownBar = ({
                         />
                       );
                     })}
-                </div>
+                </GrowBar>
                 {/* "*" like the line chart above, with the day count in the
                     footnote below: "Sep · 30 days" doesn't fit a 12-month column. */}
                 {/* flex-centered, not truncated: a label a bit wider than a

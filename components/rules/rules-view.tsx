@@ -3,12 +3,15 @@
 import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { AnimatePresence, m } from 'framer-motion';
 import { Check, Download, Pencil, Plus, Search, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Select } from '@/components/ui/field';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Modal } from '@/components/ui/modal';
 import { deleteJSON, patchJSON, postJSON } from '@/lib/api-client';
+import { listItemMotion } from '@/lib/motion/tokens';
+import { useAnimateListChange } from '@/lib/motion/use-animate-list-change';
 import type { FrontendCategoryRule } from '@/lib/services/categoryRules';
 import type { FrontendCategory } from '@/lib/services/categories';
 
@@ -68,6 +71,13 @@ export const RulesView = ({
         : initialRules,
     [initialRules, query],
   );
+  // Typing in search swaps many rows at once; only a delete or add animates.
+  const animateRules = useAnimateListChange(visibleRules.map((r) => r.id));
+  const ruleMotion = {
+    ...listItemMotion,
+    layout: animateRules ? listItemMotion.layout : false,
+    initial: animateRules ? listItemMotion.initial : false,
+  } as const;
 
   const handleAdd = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -418,7 +428,7 @@ export const RulesView = ({
               />
             </div>
           )}
-          <div className="border-line bg-paper-raised mt-4.5 hidden rounded-2xl border px-6 lg:block">
+          <div className="border-line bg-paper-raised relative mt-4.5 hidden rounded-2xl border px-6 lg:block">
             <div className="border-line text-ink-muted flex items-center gap-5 border-b py-3.5 text-[11px] font-semibold tracking-[0.08em] uppercase">
               <span className="flex-1">Match</span>
               <span className="w-[150px]">Category</span>
@@ -431,78 +441,84 @@ export const RulesView = ({
                 No rules match &ldquo;{search}&rdquo;.
               </p>
             ) : (
-              visibleRules.map((rule) => (
-                <div key={rule.id} className="ledger-row flex items-center gap-5 py-3.5">
-                  <span className="min-w-0 flex-1 font-mono text-[13px]">
-                    contains &ldquo;{rule.matchText}&rdquo;
-                  </span>
-                  <span className="w-[150px]">
-                    <span className="border-line text-ink-muted rounded-full border px-2.5 py-1 text-[12.5px]">
-                      {rule.categoryName}
+              <AnimatePresence mode="popLayout" initial={false} custom={animateRules}>
+                {visibleRules.map((rule) => (
+                  <m.div
+                    key={rule.id}
+                    {...ruleMotion}
+                    className="ledger-row flex items-center gap-5 py-3.5"
+                  >
+                    <span className="min-w-0 flex-1 font-mono text-[13px]">
+                      contains &ldquo;{rule.matchText}&rdquo;
                     </span>
-                  </span>
-                  <span className="relative w-[118px] text-right">
-                    {editingId === rule.id ? (
-                      <span className="flex items-center justify-end gap-1">
-                        <Input
-                          className="w-14 shrink-0 rounded-[9px] px-2 py-1 text-right font-mono text-[13px]"
-                          type="number"
-                          min="0"
-                          autoFocus
-                          value={editPriority}
-                          onChange={(e) => setEditPriority(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => saveEditPriority(rule.id)}
-                          disabled={editPending}
-                          className="text-sky hover:text-ink inline-flex items-center p-1 disabled:opacity-50"
-                          aria-label="Save priority"
-                        >
-                          <Check size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={cancelEditPriority}
-                          disabled={editPending}
-                          className="text-ink-muted hover:text-ink inline-flex items-center p-1 disabled:opacity-50"
-                          aria-label="Cancel edit"
-                        >
-                          <X size={14} />
-                        </button>
-                        {editError && (
-                          <span className="text-rose bg-paper-raised border-line absolute top-full right-0 z-10 mt-1 w-max max-w-[200px] rounded-md border px-2 py-1 text-xs whitespace-normal">
-                            {editError}
-                          </span>
-                        )}
+                    <span className="w-[150px]">
+                      <span className="border-line text-ink-muted rounded-full border px-2.5 py-1 text-[12.5px]">
+                        {rule.categoryName}
                       </span>
-                    ) : (
+                    </span>
+                    <span className="relative w-[118px] text-right">
+                      {editingId === rule.id ? (
+                        <span className="flex items-center justify-end gap-1">
+                          <Input
+                            className="w-14 shrink-0 rounded-[9px] px-2 py-1 text-right font-mono text-[13px]"
+                            type="number"
+                            min="0"
+                            autoFocus
+                            value={editPriority}
+                            onChange={(e) => setEditPriority(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => saveEditPriority(rule.id)}
+                            disabled={editPending}
+                            className="text-sky hover:text-ink inline-flex items-center p-1 disabled:opacity-50"
+                            aria-label="Save priority"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditPriority}
+                            disabled={editPending}
+                            className="text-ink-muted hover:text-ink inline-flex items-center p-1 disabled:opacity-50"
+                            aria-label="Cancel edit"
+                          >
+                            <X size={14} />
+                          </button>
+                          {editError && (
+                            <span className="text-rose bg-paper-raised border-line absolute top-full right-0 z-10 mt-1 w-max max-w-[200px] rounded-md border px-2 py-1 text-xs whitespace-normal">
+                              {editError}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => startEditPriority(rule)}
+                          className="text-ink-muted hover:text-iris inline-flex items-center gap-1 font-mono text-[13px] tabular-nums"
+                          title="Lower number wins when more than one rule matches"
+                        >
+                          {rule.priority}
+                          <Pencil size={11} />
+                        </button>
+                      )}
+                    </span>
+                    <span className="text-ink-muted w-[90px] text-right font-mono text-[13px] tabular-nums">
+                      {rule.appliedCount}
+                    </span>
+                    <span className="w-[60px] text-right">
                       <button
                         type="button"
-                        onClick={() => startEditPriority(rule)}
-                        className="text-ink-muted hover:text-iris inline-flex items-center gap-1 font-mono text-[13px] tabular-nums"
-                        title="Lower number wins when more than one rule matches"
+                        onClick={() => setConfirmDeleteId(rule.id)}
+                        className="text-ink-muted hover:text-rose inline-flex items-center gap-1 text-[12.5px]"
                       >
-                        {rule.priority}
-                        <Pencil size={11} />
+                        <Trash2 size={13} />
+                        Delete
                       </button>
-                    )}
-                  </span>
-                  <span className="text-ink-muted w-[90px] text-right font-mono text-[13px] tabular-nums">
-                    {rule.appliedCount}
-                  </span>
-                  <span className="w-[60px] text-right">
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteId(rule.id)}
-                      className="text-ink-muted hover:text-rose inline-flex items-center gap-1 text-[12.5px]"
-                    >
-                      <Trash2 size={13} />
-                      Delete
-                    </button>
-                  </span>
-                </div>
-              ))
+                    </span>
+                  </m.div>
+                ))}
+              </AnimatePresence>
             )}
           </div>
 
@@ -526,95 +542,102 @@ export const RulesView = ({
                 No rules match &ldquo;{search}&rdquo;.
               </p>
             ) : (
-              <div className="flex flex-col gap-2.5">
-                {visibleRules.map((rule) => (
-                  <div key={rule.id} className="border-line bg-paper-raised rounded-2xl border p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-mono text-[13.5px] break-words">
-                          contains &ldquo;{rule.matchText}&rdquo;
-                        </div>
-                        <div className="mt-2 flex items-center gap-1.5">
-                          <span className="text-ink-muted text-[11px]">→</span>
-                          <span className="border-line text-ink-muted rounded-full border px-2.5 py-1 text-[12.5px]">
-                            {rule.categoryName}
-                          </span>
-                        </div>
-                        {rule.overlapCount > 0 ? (
-                          <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                            <span className="bg-rose-soft text-rose rounded-full px-2.25 py-1 text-[11px] font-semibold">
-                              Overlaps {rule.overlapCount} rule{rule.overlapCount === 1 ? '' : 's'}
+              <div className="relative flex flex-col gap-2.5">
+                <AnimatePresence mode="popLayout" initial={false} custom={animateRules}>
+                  {visibleRules.map((rule) => (
+                    <m.div
+                      key={rule.id}
+                      {...ruleMotion}
+                      className="border-line bg-paper-raised rounded-2xl border p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-mono text-[13.5px] break-words">
+                            contains &ldquo;{rule.matchText}&rdquo;
+                          </div>
+                          <div className="mt-2 flex items-center gap-1.5">
+                            <span className="text-ink-muted text-[11px]">→</span>
+                            <span className="border-line text-ink-muted rounded-full border px-2.5 py-1 text-[12.5px]">
+                              {rule.categoryName}
                             </span>
-                            {rule.overlap && (
-                              <span className="text-ink-muted text-[11.5px]">
-                                {rule.overlap.wins ? 'Wins over' : 'Loses to'} &ldquo;
-                                {rule.overlap.matchText}&rdquo; · priority {rule.overlap.priority}
+                          </div>
+                          {rule.overlapCount > 0 ? (
+                            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                              <span className="bg-rose-soft text-rose rounded-full px-2.25 py-1 text-[11px] font-semibold">
+                                Overlaps {rule.overlapCount} rule
+                                {rule.overlapCount === 1 ? '' : 's'}
                               </span>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-ink-muted mt-2.5 text-[11.5px]">
-                            {rule.appliedCount > 0
-                              ? `Applied to ${rule.appliedCount} transaction${rule.appliedCount === 1 ? '' : 's'}`
-                              : 'Never matched — check the spelling'}
-                          </div>
-                        )}
-                        {editingId === rule.id && (
-                          <div className="mt-2.5 flex items-center gap-1.5">
-                            <span className="text-ink-muted text-[11.5px]">Priority</span>
-                            <Input
-                              className="w-16 shrink-0 rounded-[9px] px-2 py-1 text-right font-mono text-[13px]"
-                              type="number"
-                              min="0"
-                              autoFocus
-                              value={editPriority}
-                              onChange={(e) => setEditPriority(e.target.value)}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => saveEditPriority(rule.id)}
-                              disabled={editPending}
-                              className="text-sky hover:text-ink inline-flex items-center p-1 disabled:opacity-50"
-                              aria-label="Save priority"
-                            >
-                              <Check size={16} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={cancelEditPriority}
-                              disabled={editPending}
-                              className="text-ink-muted hover:text-ink inline-flex items-center p-1 disabled:opacity-50"
-                              aria-label="Cancel edit"
-                            >
-                              <X size={16} />
-                            </button>
-                          </div>
-                        )}
-                        {editError && editingId === rule.id && (
-                          <p className="text-rose mt-1 text-xs">{editError}</p>
-                        )}
+                              {rule.overlap && (
+                                <span className="text-ink-muted text-[11.5px]">
+                                  {rule.overlap.wins ? 'Wins over' : 'Loses to'} &ldquo;
+                                  {rule.overlap.matchText}&rdquo; · priority {rule.overlap.priority}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-ink-muted mt-2.5 text-[11.5px]">
+                              {rule.appliedCount > 0
+                                ? `Applied to ${rule.appliedCount} transaction${rule.appliedCount === 1 ? '' : 's'}`
+                                : 'Never matched — check the spelling'}
+                            </div>
+                          )}
+                          {editingId === rule.id && (
+                            <div className="mt-2.5 flex items-center gap-1.5">
+                              <span className="text-ink-muted text-[11.5px]">Priority</span>
+                              <Input
+                                className="w-16 shrink-0 rounded-[9px] px-2 py-1 text-right font-mono text-[13px]"
+                                type="number"
+                                min="0"
+                                autoFocus
+                                value={editPriority}
+                                onChange={(e) => setEditPriority(e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => saveEditPriority(rule.id)}
+                                disabled={editPending}
+                                className="text-sky hover:text-ink inline-flex items-center p-1 disabled:opacity-50"
+                                aria-label="Save priority"
+                              >
+                                <Check size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelEditPriority}
+                                disabled={editPending}
+                                className="text-ink-muted hover:text-ink inline-flex items-center p-1 disabled:opacity-50"
+                                aria-label="Cancel edit"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                          )}
+                          {editError && editingId === rule.id && (
+                            <p className="text-rose mt-1 text-xs">{editError}</p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => startEditPriority(rule)}
+                            aria-label="Edit rule"
+                            className="text-ink-muted flex size-9 items-center justify-center"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(rule.id)}
+                            aria-label="Delete rule"
+                            className="text-ink-muted hover:text-rose flex size-9 items-center justify-center"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex shrink-0 gap-1">
-                        <button
-                          type="button"
-                          onClick={() => startEditPriority(rule)}
-                          aria-label="Edit rule"
-                          className="text-ink-muted flex size-9 items-center justify-center"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(rule.id)}
-                          aria-label="Delete rule"
-                          className="text-ink-muted hover:text-rose flex size-9 items-center justify-center"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                    </m.div>
+                  ))}
+                </AnimatePresence>
               </div>
             )}
           </div>

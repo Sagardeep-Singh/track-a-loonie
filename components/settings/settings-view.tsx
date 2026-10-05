@@ -8,7 +8,8 @@ import { BudgetingSection } from '@/components/settings/budgeting-section';
 import { ExportDataCard } from '@/components/settings/export-data-card';
 import { ImportDataCard } from '@/components/settings/import-data-card';
 import { DeleteAccountCard } from '@/components/settings/delete-account-card';
-import { pillGroup, pillOption } from '@/components/settings/pills';
+import { pillOption } from '@/components/settings/pills';
+import { PillGroup, PillHighlight } from '@/components/settings/pill-group';
 import type { FrontendReminderPreference } from '@/lib/services/reminders';
 import type { FrontendPushSubscription } from '@/lib/services/pushSubscriptions';
 import type { AiModelsResult, FrontendAiSettings } from '@/lib/services/aiSettings';
@@ -92,7 +93,7 @@ export const SettingsView = ({
               Track a Loonie&rsquo;s color palette
             </div>
           </div>
-          <div className={pillGroup}>
+          <PillGroup>
             {PALETTES.map((p) => (
               <button
                 key={p}
@@ -100,10 +101,11 @@ export const SettingsView = ({
                 onClick={() => savePreferences(p, appearance)}
                 className={pillOption(palette === p)}
               >
-                {PALETTE_LABELS[p]}
+                <PillHighlight active={palette === p} />
+                <span className="relative">{PALETTE_LABELS[p]}</span>
               </button>
             ))}
-          </div>
+          </PillGroup>
         </div>
         <div className="flex items-center gap-5 py-3.5">
           <div className="min-w-0 flex-1">
@@ -112,7 +114,7 @@ export const SettingsView = ({
               Light, dark, or match your device
             </div>
           </div>
-          <div className={pillGroup}>
+          <PillGroup>
             {APPEARANCES.map((a) => (
               <button
                 key={a}
@@ -120,10 +122,11 @@ export const SettingsView = ({
                 onClick={() => savePreferences(palette, a)}
                 className={pillOption(appearance === a)}
               >
-                {APPEARANCE_LABELS[a]}
+                <PillHighlight active={appearance === a} />
+                <span className="relative">{APPEARANCE_LABELS[a]}</span>
               </button>
             ))}
-          </div>
+          </PillGroup>
         </div>
       </div>
 

@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 import { getServerAuthSession } from '@/lib/auth/session';
 import { getOverviewData, type OverviewDayBar } from '@/lib/services/overview';
 import { ScreenHeader } from '@/components/nav/screen-header';
+import { AnimatedMoney } from '@/components/ui/animated-money';
 import { Ring } from '@/components/ui/ring';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { ExpensePie } from '@/components/dashboard/expense-pie';
@@ -215,7 +216,7 @@ const DashboardPage = async ({
                       {hero.leftLabel}
                     </div>
                     <div className="mt-2 font-mono text-[40px] leading-none font-medium tracking-[-0.03em]">
-                      {hero.hasBudget ? money(hero.leftAmount) : '—'}
+                      {hero.hasBudget ? <AnimatedMoney value={Number(hero.leftAmount)} /> : '—'}
                     </div>
                     <div className="text-ink-muted mt-2 text-[13.5px]">
                       {hero.hasBudget ? (
@@ -287,11 +288,12 @@ const DashboardPage = async ({
                   </p>
                 ) : (
                   <div className="grid grid-cols-4 gap-2.5">
-                    {budgetRings.map((r) => (
+                    {budgetRings.map((r, index) => (
                       <Link
                         key={r.id}
+                        style={{ '--i': index } as React.CSSProperties}
                         href={overviewCategoryHref(data.month, [r.categoryId])}
-                        className="hover:bg-paper flex flex-col items-center gap-2.5 rounded-xl py-1.5"
+                        className="stagger-item hover:bg-paper flex flex-col items-center gap-2.5 rounded-xl py-1.5"
                       >
                         <Ring size="category" fraction={r.fraction}>
                           <span className="font-mono text-sm">{r.pctLabel}</span>
@@ -443,9 +445,13 @@ const DashboardPage = async ({
                     </div>
                   )}
                   <div className="font-display text-[20px] leading-[1.2] font-semibold tracking-[-0.01em]">
-                    {hero.hasBudget
-                      ? `${hero.leftLabel} ${money(hero.leftAmount)}`
-                      : 'No budget set'}
+                    {hero.hasBudget ? (
+                      <>
+                        {hero.leftLabel} <AnimatedMoney value={Number(hero.leftAmount)} />
+                      </>
+                    ) : (
+                      'No budget set'
+                    )}
                   </div>
                   <p className="text-ink-muted mt-1.5 text-[12.5px] leading-snug">
                     {hero.paceNote}

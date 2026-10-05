@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { pillGroup, pillOption } from '@/components/settings/pills';
+import { pillOption } from '@/components/settings/pills';
+import { PillGroup, PillHighlight } from '@/components/settings/pill-group';
 import { Button } from '@/components/ui/button';
 import { patchJSON } from '@/lib/api-client';
 import type { FrontendAccount } from '@/lib/services/accounts';
@@ -88,7 +89,7 @@ export const BudgetingSection = ({
               : 'A monthly limit per category. Switching keeps your limits.'}
           </div>
         </div>
-        <div className={pillGroup}>
+        <PillGroup>
           {(Object.keys(MODE_LABELS) as BudgetMode[]).map((m) => (
             <button
               key={m}
@@ -98,10 +99,11 @@ export const BudgetingSection = ({
               disabled={pending}
               className={pillOption((confirming ? 'ZERO_BASED' : mode) === m, pending)}
             >
-              {MODE_LABELS[m]}
+              <PillHighlight active={(confirming ? 'ZERO_BASED' : mode) === m} />
+              <span className="relative">{MODE_LABELS[m]}</span>
             </button>
           ))}
-        </div>
+        </PillGroup>
       </div>
 
       {confirming && (

@@ -1,4 +1,9 @@
+'use client';
+
+import { m } from 'framer-motion';
 import { cn } from '@/lib/cn';
+import { spring } from '@/lib/motion/tokens';
+import { useReducedTransition } from '@/lib/motion/use-reduced-transition';
 
 export type RingSize =
   'hero' | 'hero-mobile' | 'budget' | 'category' | 'category-mobile' | 'day' | 'row';
@@ -39,6 +44,8 @@ export const Ring = ({
   const circumference = 2 * Math.PI * radius;
   const center = box / 2;
   const color = clamped > alertAt ? 'var(--rose)' : 'var(--iris)';
+  // Fills from empty on mount and eases between values after that.
+  const fillTransition = useReducedTransition(spring.smooth);
   const markerRadius = size === 'hero' || size === 'hero-mobile' ? 4 : 3.5;
 
   return (
@@ -55,7 +62,7 @@ export const Ring = ({
           stroke="var(--paper-sunk)"
           strokeWidth={stroke}
         />
-        <circle
+        <m.circle
           cx={center}
           cy={center}
           r={radius}
@@ -63,7 +70,9 @@ export const Ring = ({
           stroke={color}
           strokeWidth={stroke}
           strokeLinecap="round"
-          strokeDasharray={`${circumference * clamped} ${circumference}`}
+          initial={{ strokeDasharray: `0 ${circumference}` }}
+          animate={{ strokeDasharray: `${circumference * clamped} ${circumference}` }}
+          transition={fillTransition}
           transform={`rotate(-90 ${center} ${center})`}
         />
         {paceMarkerAt !== undefined && (
