@@ -53,7 +53,7 @@ test('exporting downloads a JSON file containing the account data', async ({ pag
   for await (const chunk of stream) chunks.push(chunk as Buffer);
   const file = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
 
-  expect(file.formatVersion).toBe(1);
+  expect(file.formatVersion).toBe(2);
   expect(file.data.accounts.some((a: { name: string }) => a.name === accountName)).toBe(true);
   expect(file.data.transactions.some((t: { payee: string | null }) => t.payee === payee)).toBe(
     true,

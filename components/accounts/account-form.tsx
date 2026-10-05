@@ -18,14 +18,21 @@ const ACCOUNT_TYPES = [
 export const AccountForm = ({
   account,
   onDone,
+  zeroBased = false,
 }: {
   account?: FrontendAccount;
   onDone: () => void;
+  /** show the on-budget toggle; it only means something in zero-based mode */
+  zeroBased?: boolean;
 }): React.ReactElement => {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [type, setType] = useState(account?.type ?? 'CHECKING');
+  // a new account follows its type's default (savings off-budget) until the
+  // user ticks the box themselves
+  const [onBudgetChoice, setOnBudgetChoice] = useState<boolean | null>(account?.onBudget ?? null);
+  const onBudget = onBudgetChoice ?? type !== 'SAVINGS';
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -38,6 +45,7 @@ export const AccountForm = ({
       type: form.get('type'),
       startingBalance: form.get('startingBalance'),
       statementDay: type === 'CREDIT_CARD' ? form.get('statementDay') || null : null,
+      ...(zeroBased ? { onBudget } : {}),
     };
 
     const res = account
@@ -97,6 +105,24 @@ export const AccountForm = ({
             instead of calendar month.
           </p>
         </div>
+      )}
+      {zeroBased && (
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            name="onBudget"
+            className="accent-iris mt-0.5 size-4"
+            checked={onBudget}
+            onChange={(e) => setOnBudgetChoice(e.target.checked)}
+          />
+          <span>
+            On-budget
+            <span className="text-ink-muted mt-0.5 block text-xs">
+              Its balance counts toward Ready to Assign. Turn off for long-term savings you
+              don&rsquo;t want to budget.
+            </span>
+          </span>
+        </label>
       )}
       {error && (
         <p className="bg-rose-soft text-rose rounded-lg px-3 py-2 text-sm" role="alert">

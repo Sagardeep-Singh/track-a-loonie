@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/prisma';
+import { spreadEndMonth } from '@/lib/spread';
 import { USER_DATA_FORMAT_VERSION, type UserDataFile } from '@/lib/validators/user-data';
 
 const decimalToString = (value: unknown): string => Number(value).toFixed(2);
@@ -15,6 +16,8 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
     budgets,
     categoryRules,
     reimbursementLinks,
+    categoryAssignments,
+    budgetSettings,
   ] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, name: true } }),
     prisma.account.findMany({
@@ -25,6 +28,7 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         type: true,
         startingBalance: true,
         statementDay: true,
+        onBudget: true,
         createdAt: true,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -70,6 +74,8 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         isReimbursable: true,
         reimbursementExpectedAmount: true,
         reimbursementCompletedAt: true,
+        spreadStartMonth: true,
+        spreadMonths: true,
         skippedAt: true,
         createdAt: true,
       },
@@ -99,6 +105,15 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     }),
+    prisma.categoryAssignment.findMany({
+      where: { userId },
+      select: { id: true, categoryId: true, month: true, amount: true },
+      orderBy: [{ month: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.userBudgetSettings.findUnique({
+      where: { userId },
+      select: { mode: true, zbbStartMonth: true },
+    }),
   ]);
 
   return {
@@ -112,6 +127,7 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         type: a.type,
         startingBalance: decimalToString(a.startingBalance),
         statementDay: a.statementDay,
+        onBudget: a.onBudget,
         createdAt: a.createdAt,
       })),
       categories: categories.map((c) => ({
@@ -153,6 +169,8 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
             ? null
             : decimalToString(t.reimbursementExpectedAmount),
         reimbursementCompletedAt: t.reimbursementCompletedAt,
+        spreadStartMonth: t.spreadStartMonth,
+        spreadMonths: t.spreadMonths,
         skippedAt: t.skippedAt,
         createdAt: t.createdAt,
       })),
@@ -175,6 +193,15 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         amount: decimalToString(l.amount),
         createdAt: l.createdAt,
       })),
+      categoryAssignments: categoryAssignments.map((a) => ({
+        id: a.id,
+        categoryId: a.categoryId,
+        month: a.month,
+        amount: decimalToString(a.amount),
+      })),
+      budgetSettings: budgetSettings
+        ? { mode: budgetSettings.mode, zbbStartMonth: budgetSettings.zbbStartMonth }
+        : null,
     },
   };
 };
@@ -198,6 +225,7 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
 export const wipeUserData = async (tx: Prisma.TransactionClient, userId: string): Promise<void> => {
   await tx.reimbursementLink.deleteMany({ where: { userId } });
   await tx.budget.deleteMany({ where: { userId } });
+  await tx.categoryAssignment.deleteMany({ where: { userId } });
   await tx.categoryRule.deleteMany({ where: { userId } });
   await tx.transaction.deleteMany({ where: { userId } });
   await tx.importBatch.deleteMany({ where: { userId } });
@@ -224,6 +252,7 @@ export type ImportUserDataResult = {
     budgets: number;
     categoryRules: number;
     reimbursementLinks: number;
+    categoryAssignments: number;
   };
 };
 
@@ -268,6 +297,7 @@ export const importUserData = async (
             type: a.type,
             startingBalance: a.startingBalance,
             statementDay: a.statementDay,
+            onBudget: a.onBudget ?? a.type !== 'SAVINGS',
             createdAt: a.createdAt,
           })),
         });
@@ -326,6 +356,12 @@ export const importUserData = async (
             isReimbursable: t.isReimbursable,
             reimbursementExpectedAmount: t.reimbursementExpectedAmount,
             reimbursementCompletedAt: t.reimbursementCompletedAt,
+            spreadStartMonth: t.spreadMonths == null ? null : (t.spreadStartMonth ?? null),
+            spreadMonths: t.spreadStartMonth == null ? null : (t.spreadMonths ?? null),
+            spreadEndMonth:
+              t.spreadStartMonth == null || t.spreadMonths == null
+                ? null
+                : spreadEndMonth(t.spreadStartMonth, t.spreadMonths),
             skippedAt: t.skippedAt,
             createdAt: t.createdAt,
           })),
@@ -368,6 +404,27 @@ export const importUserData = async (
           })),
         });
       }
+
+      for (const rows of chunk(data.categoryAssignments ?? [], CREATE_MANY_CHUNK_SIZE)) {
+        await tx.categoryAssignment.createMany({
+          data: rows.map((a) => ({
+            id: randomUUID(),
+            userId,
+            categoryId: categoryIds.get(a.categoryId)!,
+            month: a.month,
+            amount: a.amount,
+          })),
+        });
+      }
+
+      // a v1 file says nothing about the budgeting mode, so the current one
+      // stays; a v2 file carries it (null = never changed, i.e. LIMITS)
+      if (data.budgetSettings !== undefined) {
+        await tx.userBudgetSettings.deleteMany({ where: { userId } });
+        if (data.budgetSettings !== null) {
+          await tx.userBudgetSettings.create({ data: { userId, ...data.budgetSettings } });
+        }
+      }
     },
     { timeout: 60_000, maxWait: 10_000 },
   );
@@ -381,6 +438,7 @@ export const importUserData = async (
       budgets: data.budgets.length,
       categoryRules: data.categoryRules.length,
       reimbursementLinks: data.reimbursementLinks.length,
+      categoryAssignments: data.categoryAssignments?.length ?? 0,
     },
   };
 };

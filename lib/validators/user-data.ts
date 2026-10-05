@@ -1,6 +1,10 @@
 import { z } from 'zod';
+import { SPREAD_MAX_MONTHS, SPREAD_MIN_MONTHS } from '@/lib/spread';
 
-export const USER_DATA_FORMAT_VERSION = 1;
+export const USER_DATA_FORMAT_VERSION = 2;
+/** v1 predates zero-based budgeting; its files still import, with the
+ * zero-based fields falling back to their defaults. */
+const SUPPORTED_FORMAT_VERSIONS = [1, USER_DATA_FORMAT_VERSION];
 /** Enforced by the route before this schema even runs — see the byte-length
  * re-check in `app/api/settings/import/route.ts`. Exported so the client's
  * size precheck and error copy can derive from the same number. */
@@ -24,6 +28,8 @@ const accountSchema = z.strictObject({
   type: z.enum(['CHECKING', 'SAVINGS', 'CREDIT_CARD', 'CASH']),
   startingBalance: signedDecimal,
   statementDay: z.number().int().min(1).max(28).nullable(),
+  /** v2+; absent in v1 files, where import derives it from `type` */
+  onBudget: z.boolean().optional(),
   createdAt: z.coerce.date(),
 });
 
@@ -65,6 +71,24 @@ const transactionSchema = z.strictObject({
   isReimbursable: z.boolean(),
   reimbursementExpectedAmount: unsignedDecimal.nullable(),
   reimbursementCompletedAt: z.coerce.date().nullable(),
+  // optional so exports from before spreading existed still import;
+  // spreadEndMonth is never in the file, it's recomputed on import
+  spreadStartMonth: z
+    .number()
+    .int()
+    .refine(
+      (month) => month >= 190001 && month <= 999912 && month % 100 >= 1 && month % 100 <= 12,
+      'Invalid spread start month.',
+    )
+    .nullable()
+    .default(null),
+  spreadMonths: z
+    .number()
+    .int()
+    .min(SPREAD_MIN_MONTHS)
+    .max(SPREAD_MAX_MONTHS)
+    .nullable()
+    .default(null),
   skippedAt: z.coerce.date().nullable(),
   createdAt: z.coerce.date(),
 });
@@ -84,6 +108,18 @@ const budgetSchema = z.strictObject({
   categoryId: z.string().min(1),
   month: budgetMonth,
   limitAmount: unsignedDecimal,
+});
+
+const categoryAssignmentSchema = z.strictObject({
+  id: z.string().min(1),
+  categoryId: z.string().min(1),
+  month: budgetMonth,
+  amount: signedDecimal,
+});
+
+const budgetSettingsSchema = z.strictObject({
+  mode: z.enum(['LIMITS', 'ZERO_BASED']),
+  zbbStartMonth: budgetMonth.nullable(),
 });
 
 const categoryRuleSchema = z.strictObject({
@@ -109,6 +145,10 @@ const dataSchema = z.strictObject({
   budgets: z.array(budgetSchema),
   categoryRules: z.array(categoryRuleSchema),
   reimbursementLinks: z.array(reimbursementLinkSchema),
+  /** v2+, like `budgetSettings`; absent in v1 files */
+  categoryAssignments: z.array(categoryAssignmentSchema).optional(),
+  /** null = the user never changed the budgeting mode (LIMITS) */
+  budgetSettings: budgetSettingsSchema.nullable().optional(),
 });
 
 const findDuplicateKey = (keys: string[]): string | null => {
@@ -124,7 +164,7 @@ export const userDataFileSchema = z
   .strictObject({
     // Checked first and given its own message so a version mismatch reads
     // as "wrong version", not as a wall of unrelated shape errors.
-    formatVersion: z.number().refine((v) => v === USER_DATA_FORMAT_VERSION, {
+    formatVersion: z.number().refine((v) => SUPPORTED_FORMAT_VERSIONS.includes(v), {
       message: 'This file was made by a different version of Track a Loonie.',
     }),
     exportedAt: z.string(), // metadata only, ignored on import
@@ -133,6 +173,7 @@ export const userDataFileSchema = z
   })
   .superRefine((file, ctx) => {
     const { data } = file;
+    const categoryAssignments = data.categoryAssignments ?? [];
     const totalRecords =
       data.accounts.length +
       data.categories.length +
@@ -140,7 +181,8 @@ export const userDataFileSchema = z
       data.transactions.length +
       data.budgets.length +
       data.categoryRules.length +
-      data.reimbursementLinks.length;
+      data.reimbursementLinks.length +
+      categoryAssignments.length;
     if (totalRecords > MAX_IMPORT_RECORDS) {
       ctx.addIssue({
         code: 'custom',
@@ -162,6 +204,7 @@ export const userDataFileSchema = z
       ['budgets', data.budgets],
       ['categoryRules', data.categoryRules],
       ['reimbursementLinks', data.reimbursementLinks],
+      ['categoryAssignments', categoryAssignments],
     ];
     for (const [path, rows] of idDuplicateChecks) {
       const duplicate = findDuplicateKey(rows.map((r) => r.id));
@@ -239,6 +282,24 @@ export const userDataFileSchema = z
           message: 'A reimbursable expense cannot also be a transfer or a card payment.',
         });
       }
+      if ((t.spreadStartMonth === null) !== (t.spreadMonths === null)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: path('spreadMonths'),
+          message: 'spreadStartMonth and spreadMonths must both be set or both be null.',
+        });
+      }
+      if (
+        t.spreadMonths !== null &&
+        (t.type !== 'EXPENSE' || t.isTransfer || t.isPayment || t.isReimbursable)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: path('spreadMonths'),
+          message:
+            'Only a plain expense can be spread (not income, a transfer, a card payment or reimbursable).',
+        });
+      }
       if (t.reimbursementCompletedAt !== null && !t.isReimbursable) {
         ctx.addIssue({
           code: 'custom',
@@ -281,6 +342,23 @@ export const userDataFileSchema = z
         code: 'custom',
         path: ['data', 'budgets'],
         message: 'Duplicate budget for the same category and month.',
+      });
+    }
+
+    categoryAssignments.forEach((assignment, i) => {
+      if (!categoryIds.has(assignment.categoryId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['data', 'categoryAssignments', i, 'categoryId'],
+          message: 'Unknown category.',
+        });
+      }
+    });
+    if (findDuplicateKey(categoryAssignments.map((a) => `${a.categoryId}:${a.month}`))) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['data', 'categoryAssignments'],
+        message: 'Duplicate assignment for the same category and month.',
       });
     }
 

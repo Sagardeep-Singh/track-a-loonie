@@ -62,6 +62,24 @@ describe('sendEmail', () => {
     });
   });
 
+  it("returns Brevo's messageId, or none when the body has no usable one", async () => {
+    const { sendEmail } = await import('@/lib/email/brevo');
+    const params = { to: 'a@b.com', subject: 'Hi', html: '<p>hi</p>' };
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ messageId: '<m1>' }),
+    });
+    expect(await sendEmail(params)).toEqual({ messageId: '<m1>' });
+
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({}) });
+    expect(await sendEmail(params)).toEqual({});
+
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 201 });
+    expect(await sendEmail(params)).toEqual({});
+  });
+
   it('sends the plain-text alternative when one is given', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 201 });
     const { sendEmail } = await import('@/lib/email/brevo');

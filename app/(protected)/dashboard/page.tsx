@@ -8,6 +8,7 @@ import { Ring } from '@/components/ui/ring';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { ExpensePie } from '@/components/dashboard/expense-pie';
 import { DayPanel } from '@/components/dashboard/day-panel';
+import { SpreadNote } from '@/components/dashboard/spread-note';
 import { getByDayBars } from '@/lib/dashboard/day-bars';
 import {
   overviewCategoryHref,
@@ -322,6 +323,7 @@ const DashboardPage = async ({
                   <span className="text-ink-muted text-xs">all expenses this month</span>
                 </div>
                 <ExpensePie slices={expenseBreakdown} total={hero.expense} month={data.month} />
+                <SpreadNote shares={data.spreadShares} total={data.spreadTotal} />
               </div>
 
               <div className="border-line bg-paper-raised rounded-[18px] border p-5.5">

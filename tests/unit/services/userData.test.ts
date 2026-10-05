@@ -16,6 +16,8 @@ const { prismaMock } = vi.hoisted(() => {
     budget: makeModel(),
     categoryRule: makeModel(),
     reimbursementLink: makeModel(),
+    categoryAssignment: makeModel(),
+    userBudgetSettings: { ...makeModel(), findUnique: vi.fn(), create: vi.fn() },
     // Not part of the 7-model export/import contract. Present only so the two
     // BYOK regression tests below can assert *zero* calls on it.
     userAiSettings: makeModel(),
@@ -53,9 +55,12 @@ describe('exportUserData', () => {
         type: 'CHECKING',
         startingBalance: '100',
         statementDay: null,
+        onBudget: true,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
       },
     ]);
+    prismaMock.categoryAssignment.findMany.mockResolvedValue([]);
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
     prismaMock.category.findMany.mockResolvedValue([]);
     prismaMock.importBatch.findMany.mockResolvedValue([]);
     prismaMock.transaction.findMany.mockResolvedValue([]);
@@ -73,6 +78,7 @@ describe('exportUserData', () => {
       type: 'CHECKING',
       startingBalance: '100.00',
       statementDay: null,
+      onBudget: true,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     });
     expect(JSON.stringify(file)).not.toContain('passwordHash');
@@ -219,6 +225,37 @@ describe('importUserData', () => {
       budgets: 0,
       categoryRules: 0,
       reimbursementLinks: 0,
+      categoryAssignments: 0,
+    });
+  });
+
+  it('restores a spread expense and recomputes its end month rather than trusting the file', async () => {
+    const file = structuredClone(baseFile);
+    Object.assign(file.data.transactions[0], {
+      isTransfer: false,
+      transferMatchId: null,
+      spreadStartMonth: 202607,
+      spreadMonths: 12,
+    });
+
+    await importUserData('user-1', file as never);
+
+    const [txArg] = prismaMock.transaction.createMany.mock.calls[0];
+    expect(txArg.data[0]).toMatchObject({
+      spreadStartMonth: 202607,
+      spreadMonths: 12,
+      spreadEndMonth: 202706,
+    });
+  });
+
+  it('imports a pre-spread export (no spread fields) as not spread', async () => {
+    await importUserData('user-1', baseFile as never);
+
+    const [txArg] = prismaMock.transaction.createMany.mock.calls[0];
+    expect(txArg.data[0]).toMatchObject({
+      spreadStartMonth: null,
+      spreadMonths: null,
+      spreadEndMonth: null,
     });
   });
 
@@ -259,6 +296,72 @@ describe('importUserData', () => {
     for (const row of [...accountArg.data, ...categoryArg.data, ...txArg.data]) {
       expect(row.userId).toBe('some-other-user');
     }
+  });
+});
+
+describe('importUserData zero-based fields', () => {
+  const v1File = {
+    formatVersion: 1,
+    exportedAt: new Date().toISOString(),
+    user: { email: 'a@example.com', name: null },
+    data: {
+      accounts: [
+        {
+          id: 'old-sav',
+          name: 'Savings',
+          type: 'SAVINGS' as const,
+          startingBalance: '0.00',
+          statementDay: null,
+          createdAt: new Date('2026-01-01'),
+        },
+      ],
+      categories: [
+        { id: 'old-cat', name: 'Groceries', isDefault: false, createdAt: new Date('2026-01-01') },
+      ],
+      importBatches: [],
+      transactions: [],
+      budgets: [],
+      categoryRules: [],
+      reimbursementLinks: [],
+    },
+  };
+
+  it('derives onBudget from type and leaves the budgeting mode alone for a v1 file', async () => {
+    await importUserData('user-1', v1File as never);
+
+    const [accountArg] = prismaMock.account.createMany.mock.calls[0];
+    expect(accountArg.data[0].onBudget).toBe(false);
+    expect(prismaMock.userBudgetSettings.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.userBudgetSettings.create).not.toHaveBeenCalled();
+  });
+
+  it('restores assignments (remapped) and budget settings from a v2 file', async () => {
+    await importUserData('user-1', {
+      ...v1File,
+      formatVersion: 2,
+      data: {
+        ...v1File.data,
+        categoryAssignments: [{ id: 'a', categoryId: 'old-cat', month: 202601, amount: '-5.00' }],
+        budgetSettings: { mode: 'ZERO_BASED', zbbStartMonth: 202601 },
+      },
+    } as never);
+
+    const [categoryArg] = prismaMock.category.createMany.mock.calls[0];
+    const [assignmentArg] = prismaMock.categoryAssignment.createMany.mock.calls[0];
+    expect(assignmentArg.data[0]).toEqual(
+      expect.objectContaining({
+        userId: 'user-1',
+        categoryId: categoryArg.data[0].id,
+        month: 202601,
+        amount: '-5.00',
+      }),
+    );
+    expect(prismaMock.userBudgetSettings.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+    });
+    expect(prismaMock.userBudgetSettings.create).toHaveBeenCalledWith({
+      data: { userId: 'user-1', mode: 'ZERO_BASED', zbbStartMonth: 202601 },
+    });
   });
 });
 

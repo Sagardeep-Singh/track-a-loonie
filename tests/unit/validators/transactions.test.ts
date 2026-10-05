@@ -208,3 +208,88 @@ describe('transactionsPageQuerySchema', () => {
     expect(transactionsPageQuerySchema.parse({ limit: '25' }).limit).toBe(25);
   });
 });
+
+describe('transaction spread rules', () => {
+  const spread = { spreadStartMonth: 202601, spreadMonths: 12 };
+
+  it('accepts a spread expense', () => {
+    const result = createTransactionSchema.safeParse({ ...base, date: '2026-06-15', ...spread });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts an explicit null pair (clearing a spread)', () => {
+    const result = updateTransactionSchema.safeParse({
+      spreadStartMonth: null,
+      spreadMonths: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a start month without a month count, and the reverse', () => {
+    expect(createTransactionSchema.safeParse({ ...base, spreadStartMonth: 202601 }).success).toBe(
+      false,
+    );
+    expect(createTransactionSchema.safeParse({ ...base, spreadMonths: 12 }).success).toBe(false);
+    expect(
+      updateTransactionSchema.safeParse({ spreadStartMonth: 202601, spreadMonths: null }).success,
+    ).toBe(false);
+  });
+
+  it('rejects spreading an income', () => {
+    const result = createTransactionSchema.safeParse({ ...base, type: 'INCOME', ...spread });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects spread combined with a transfer, a card payment or reimbursable', () => {
+    expect(
+      createTransactionSchema.safeParse({ ...base, ...spread, isTransfer: true }).success,
+    ).toBe(false);
+    expect(createTransactionSchema.safeParse({ ...base, ...spread, isPayment: true }).success).toBe(
+      false,
+    );
+    expect(
+      createTransactionSchema.safeParse({
+        ...base,
+        ...spread,
+        isReimbursable: true,
+        reimbursementExpectedAmount: 5,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('bounds the month count to 2-24 whole months', () => {
+    const parse = (spreadMonths: number): boolean =>
+      createTransactionSchema.safeParse({ ...base, spreadStartMonth: 202601, spreadMonths })
+        .success;
+    expect(parse(1)).toBe(false);
+    expect(parse(2)).toBe(true);
+    expect(parse(24)).toBe(true);
+    expect(parse(25)).toBe(false);
+    expect(parse(2.5)).toBe(false);
+  });
+
+  it('rejects a malformed start month', () => {
+    expect(
+      createTransactionSchema.safeParse({ ...base, spreadStartMonth: 202613, spreadMonths: 12 })
+        .success,
+    ).toBe(false);
+    expect(
+      createTransactionSchema.safeParse({ ...base, spreadStartMonth: 202600, spreadMonths: 12 })
+        .success,
+    ).toBe(false);
+  });
+
+  it('keeps the start month within 24 months of the transaction date', () => {
+    const parse = (spreadStartMonth: number): boolean =>
+      createTransactionSchema.safeParse({
+        ...base,
+        date: '2026-06-15',
+        spreadStartMonth,
+        spreadMonths: 12,
+      }).success;
+    expect(parse(202406)).toBe(true);
+    expect(parse(202405)).toBe(false);
+    expect(parse(202806)).toBe(true);
+    expect(parse(202807)).toBe(false);
+  });
+});

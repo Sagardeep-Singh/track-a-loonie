@@ -26,9 +26,11 @@ const money = (value: number): string =>
 export const AccountsView = ({
   initialAccounts,
   pendingReimbursement,
+  zeroBased = false,
 }: {
   initialAccounts: FrontendAccount[];
   pendingReimbursement: FrontendReimbursementPendingSummary;
+  zeroBased?: boolean;
 }): React.ReactElement => {
   const router = useRouter();
   const [dialogKey, setDialogKey] = useState(0);
@@ -153,6 +155,7 @@ export const AccountsView = ({
               )}
 
               <div className="text-ink-muted mt-3 text-[11.5px]">
+                {zeroBased && !account.onBudget ? 'Off-budget · ' : ''}
                 {isCreditCard && account.statementDay
                   ? `Statement closes the ${ordinal(account.statementDay)} · `
                   : ''}
@@ -200,7 +203,7 @@ export const AccountsView = ({
         onClose={() => setOpen(false)}
         title={editing ? 'Edit account' : 'Add account'}
       >
-        <AccountForm account={editing} onDone={() => setOpen(false)} />
+        <AccountForm account={editing} onDone={() => setOpen(false)} zeroBased={zeroBased} />
       </Modal>
       <ConfirmDialog
         open={confirmDeleteId !== null}

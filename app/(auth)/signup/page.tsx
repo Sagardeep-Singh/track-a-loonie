@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { SourceLink } from '@/components/nav/source-link';
 import { SignUpForm } from '@/components/auth/signup-form';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { LogoMark } from '@/components/ui/logo-mark';
@@ -57,7 +56,6 @@ const SignUpPage = (): React.ReactElement => {
               Sign in
             </Link>
           </p>
-          <SourceLink className="mt-8 text-center" />
         </div>
       </div>
     </>

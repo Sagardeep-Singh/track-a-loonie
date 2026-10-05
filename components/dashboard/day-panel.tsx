@@ -101,7 +101,10 @@ export const DayPanel = ({
             >
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13.5px] font-medium">{row.payee}</div>
-                <div className="text-ink-muted mt-0.5 text-xs">{row.categoryName}</div>
+                <div className="text-ink-muted mt-0.5 text-xs">
+                  {row.categoryName}
+                  {row.isSpread && ' · Spread over months, not counted on this day'}
+                </div>
               </div>
               <Money
                 value={row.amount}

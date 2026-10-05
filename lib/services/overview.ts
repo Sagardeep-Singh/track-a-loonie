@@ -1,8 +1,9 @@
 import { daysInMonth as daysInMonthOf, monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
-import { listBudgets } from '@/lib/services/budgets';
+import { listBudgetsForMode } from '@/lib/services/zeroBased';
 import { getCategorizeQueueStats } from '@/lib/services/categorize';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
+import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 import { getStatementPeriod } from '@/lib/statement';
 
 export type OverviewDayBar = { day: number; income: number; expense: number };
@@ -13,6 +14,19 @@ export type OverviewDayEntry = {
   categoryName: string | null;
   amount: string;
   tone: 'income' | 'expense';
+  /** a spread payment: listed on its day, but its amount counts through monthly shares */
+  isSpread: boolean;
+};
+
+/** One spread payment's share of the selected month, with where the real payment lives. */
+export type OverviewSpreadShare = {
+  transactionId: string;
+  payee: string;
+  categoryName: string;
+  amount: string;
+  /** the payment's own YYYYMM month and day, for linking to it on Transactions */
+  sourceMonth: number;
+  sourceDay: number;
 };
 
 export type OverviewBudgetRing = {
@@ -68,6 +82,9 @@ export type OverviewData = {
   };
   budgetRings: OverviewBudgetRing[];
   expenseBreakdown: OverviewExpenseSlice[];
+  /** spread payments counted in this month's expense/pie/budgets through their shares */
+  spreadShares: OverviewSpreadShare[];
+  spreadTotal: string;
   dayBars: OverviewDayBar[];
   selectedDay: {
     day: number;
@@ -106,8 +123,8 @@ export const getOverviewData = async (
   const now = new Date();
   const todayOfMonth = isCurrentMonth ? now.getUTCDate() : daysInMonth;
 
-  const [budgets, transactions, cardAccount, reimbursedExpenses] = await Promise.all([
-    listBudgets(userId, month),
+  const [budgets, transactions, cardAccount, reimbursedExpenses, spreadShares] = await Promise.all([
+    listBudgetsForMode(userId, month),
     prisma.transaction.findMany({
       where: { userId, date: { gte: start, lt: end } },
       include: {
@@ -121,7 +138,16 @@ export const getOverviewData = async (
       orderBy: { createdAt: 'asc' },
     }),
     listReimbursedAmountsByExpenseDate(userId, start, end),
+    listSpreadSharesInRange(userId, month, month),
   ]);
+
+  // A spread expense is still listed on its own day, but its amount counts
+  // through its monthly shares (possibly from a payment dated in another
+  // month), never through its own date — so every expense aggregate below
+  // skips it and adds `spreadShares` instead.
+  const isCountedExpense = (t: (typeof transactions)[number]): boolean =>
+    t.type === 'EXPENSE' && !t.isTransfer && t.spreadMonths == null;
+  const spreadTotal = spreadShares.reduce((sum, s) => sum + Number(s.amount), 0);
 
   // Reimbursed amount per expense, so hero.expense/the pie/day bars/daySpent can
   // net out reimbursements the same way budgets.ts already does — otherwise
@@ -157,25 +183,28 @@ export const getOverviewData = async (
   const income = transactions
     .filter((t) => t.type === 'INCOME' && !t.isPayment && !t.isTransfer)
     .reduce((sum, t) => sum + netIncomeAmount(t), 0);
-  const expense = transactions
-    .filter((t) => t.type === 'EXPENSE' && !t.isTransfer)
-    .reduce((sum, t) => sum + netExpenseAmount(t), 0);
+  const expense =
+    transactions.filter(isCountedExpense).reduce((sum, t) => sum + netExpenseAmount(t), 0) +
+    spreadTotal;
 
   // Every expense this month, by category — unlike budgetRings this isn't
   // limited to categories that have a budget set. Net of reimbursements, same
   // as `expense` above.
   const expenseTotalsByCategory = new Map<string, { name: string; amount: number }>();
-  for (const t of transactions) {
-    if (t.type !== 'EXPENSE' || t.isTransfer) continue;
-    const key = t.categoryId ?? 'uncategorized';
-    const name = t.category?.name ?? 'Uncategorized';
+  const addToCategory = (categoryId: string | null, name: string | null, amount: number): void => {
+    const key = categoryId ?? 'uncategorized';
     const entry = expenseTotalsByCategory.get(key);
     if (entry) {
-      entry.amount += netExpenseAmount(t);
+      entry.amount += amount;
     } else {
-      expenseTotalsByCategory.set(key, { name, amount: netExpenseAmount(t) });
+      expenseTotalsByCategory.set(key, { name: name ?? 'Uncategorized', amount });
     }
+  };
+  for (const t of transactions) {
+    if (!isCountedExpense(t)) continue;
+    addToCategory(t.categoryId, t.category?.name ?? null, netExpenseAmount(t));
   }
+  for (const s of spreadShares) addToCategory(s.categoryId, s.categoryName, Number(s.amount));
   const sortedExpenseSlices = [...expenseTotalsByCategory.entries()]
     .map(([categoryId, v]) => ({
       categoryId: categoryId === 'uncategorized' ? null : categoryId,
@@ -228,7 +257,7 @@ export const getOverviewData = async (
     const d = t.date.getUTCDate();
     const bucket = dayMap.get(d)!;
     if (t.type === 'INCOME' && !t.isPayment && !t.isTransfer) bucket.income += netIncomeAmount(t);
-    if (t.type === 'EXPENSE' && !t.isTransfer) bucket.expense += netExpenseAmount(t);
+    if (isCountedExpense(t)) bucket.expense += netExpenseAmount(t);
   }
   const dayBars: OverviewDayBar[] = Array.from(dayMap.entries()).map(([day, v]) => ({
     day,
@@ -242,7 +271,7 @@ export const getOverviewData = async (
   );
   const dayTransactions = transactions.filter((t) => t.date.getUTCDate() === selectedDayNum);
   const daySpent = dayTransactions
-    .filter((t) => t.type === 'EXPENSE' && !t.isTransfer)
+    .filter(isCountedExpense)
     .reduce((sum, t) => sum + netExpenseAmount(t), 0);
   const dayFraction = dailyPace > 0 ? daySpent / dailyPace : 0;
   const dayOver = dailyPace > 0 && daySpent > dailyPace;
@@ -326,6 +355,20 @@ export const getOverviewData = async (
       };
     }),
     expenseBreakdown,
+    spreadShares: [...spreadShares]
+      .sort((a, b) => Number(b.amount) - Number(a.amount))
+      .map((s) => {
+        const date = new Date(s.date);
+        return {
+          transactionId: s.transactionId,
+          payee: s.payee ?? s.categoryName ?? 'Transaction',
+          categoryName: s.categoryName ?? 'Uncategorized',
+          amount: s.amount,
+          sourceMonth: date.getUTCFullYear() * 100 + (date.getUTCMonth() + 1),
+          sourceDay: date.getUTCDate(),
+        };
+      }),
+    spreadTotal: spreadTotal.toFixed(2),
     dayBars,
     selectedDay: {
       day: selectedDayNum,
@@ -346,6 +389,7 @@ export const getOverviewData = async (
         categoryName: t.category?.name ?? 'Uncategorized',
         amount: Number(t.amount).toFixed(2),
         tone: t.type === 'INCOME' ? 'income' : 'expense',
+        isSpread: t.spreadMonths != null,
       })),
     },
     triage,

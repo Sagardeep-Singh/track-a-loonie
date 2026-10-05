@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AnimatePresence, m } from 'framer-motion';
 import {
   ArrowLeftRight,
+  CalendarRange,
   HandCoins,
   Loader2,
   Plus,
@@ -662,6 +663,23 @@ export const TransactionsView = ({
                                     pending
                                   </span>
                                 )}
+                              </div>
+                            )}
+                            {t.spreadMonths !== null && t.spreadMonthlyAmount !== null && (
+                              <div
+                                className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]"
+                                data-testid="spread-chip"
+                              >
+                                <CalendarRange size={11} />
+                                <span className="flex items-center gap-1">
+                                  Spread · {t.spreadMonths} mo ·{' '}
+                                  <Money
+                                    value={t.spreadMonthlyAmount}
+                                    tone="neutral"
+                                    className="text-[11px]"
+                                  />
+                                  /mo
+                                </span>
                               </div>
                             )}
                           </div>

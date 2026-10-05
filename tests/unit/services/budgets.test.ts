@@ -32,6 +32,44 @@ beforeEach(() => {
 });
 
 describe('listBudgets', () => {
+  it('counts spread expenses by monthly share and keeps them out of the date-based sum', async () => {
+    prismaMock.budget.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        categoryId: 'cat-tax',
+        month: 202603,
+        limitAmount: 400,
+        category: { name: 'Property tax' },
+      },
+    ]);
+    // the date-based groupBy (spread rows excluded) has nothing for March
+    prismaMock.transaction.groupBy.mockResolvedValue([]);
+    prismaMock.transaction.findMany.mockImplementation(
+      async (args: { where?: { spreadEndMonth?: unknown } }) =>
+        args?.where?.spreadEndMonth
+          ? [
+              {
+                id: 'tax',
+                amount: 3600,
+                date: new Date('2026-06-15'),
+                payee: 'City',
+                categoryId: 'cat-tax',
+                category: { name: 'Property tax' },
+                spreadStartMonth: 202601,
+                spreadMonths: 12,
+              },
+            ]
+          : [],
+    );
+
+    const [budget] = await listBudgets('user-1', 202603);
+
+    expect(budget.spent).toBe('300.00');
+    expect(prismaMock.transaction.groupBy.mock.calls[0][0].where).toMatchObject({
+      spreadMonths: null,
+    });
+  });
+
   it('pairs each budget with expense spend for that category and month', async () => {
     prismaMock.budget.findMany.mockResolvedValue([
       {
