@@ -38,13 +38,14 @@ export const AddTransactionOverlay = ({
   }, [router, pathname]);
 
   // Same ?overlay=add contract, two shells: the desktop drawer and the
-  // mobile full-screen keypad screen. Both gate their contents on `open` so
-  // the mobile shell's local state resets on every open.
+  // mobile full-screen keypad screen. Both remount their contents on every
+  // open so local state resets: the drawer unmounts its children once its
+  // exit animation finishes, the mobile shell is gated on `open` directly.
   return (
     <>
       <div className="hidden lg:block">
         <Drawer open={open} onClose={close} title="Log a transaction">
-          {open && <TransactionForm accounts={accounts} categories={categories} onDone={close} />}
+          <TransactionForm accounts={accounts} categories={categories} onDone={close} />
         </Drawer>
       </div>
       <div className="lg:hidden">

@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { patchJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { formatDate } from '@/lib/format';
-import { pillGroup, pillOption } from '@/components/settings/pills';
+import { pillOption } from '@/components/settings/pills';
+import { PillGroup, PillHighlight } from '@/components/settings/pill-group';
 import {
   reconcileRevokedPermission,
   subscribeToPush,
@@ -187,7 +188,7 @@ export const RemindersSection = ({
           <div className={cn('text-sm font-medium', !enabled && 'text-ink-muted')}>How often</div>
           <div className="text-ink-muted mt-0.5 text-[12.5px]">At most one nudge per period</div>
         </div>
-        <div className={cn(pillGroup, 'justify-start sm:justify-end')}>
+        <PillGroup className="justify-start sm:justify-end">
           {REMINDER_CADENCES.map((option) => (
             <button
               key={option}
@@ -199,10 +200,11 @@ export const RemindersSection = ({
               onClick={() => handleCadence(option)}
               className={pillOption(enabled && cadence === option, !enabled)}
             >
-              {CADENCE_LABELS[option]}
+              <PillHighlight active={enabled && cadence === option} />
+              <span className="relative">{CADENCE_LABELS[option]}</span>
             </button>
           ))}
-        </div>
+        </PillGroup>
       </div>
 
       {notice && (

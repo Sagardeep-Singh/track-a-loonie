@@ -3,12 +3,14 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { m } from 'framer-motion';
 import { LayoutDashboard, LogOut, MoreHorizontal, PiggyBank, Receipt, Tag } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { SidebarNav } from '@/components/nav/sidebar-nav';
 import { signOutAction } from '@/lib/auth/actions';
 import { buildMoreItems } from '@/lib/nav/items';
 import { cn } from '@/lib/cn';
+import { spring } from '@/lib/motion/tokens';
 import type { NavCounts } from '@/lib/services/nav';
 
 /**
@@ -78,8 +80,18 @@ export const BottomNav = ({ counts }: { counts: NavCounts }): React.ReactElement
                 active ? 'text-iris' : 'text-ink-muted',
               )}
             >
-              {item.icon}
-              <span>{item.label}</span>
+              {/* Soft pill behind the active icon; slides between tabs since
+                  this nav lives in the layout and survives route changes. */}
+              {active && (
+                <m.span
+                  layoutId="bottom-nav-active"
+                  transition={spring.snappy}
+                  aria-hidden="true"
+                  className="bg-iris-soft absolute inset-x-0 top-[7px] mx-auto h-7 w-14 rounded-full"
+                />
+              )}
+              <span className="relative">{item.icon}</span>
+              <span className="relative">{item.label}</span>
               {item.showDot && (
                 <span
                   data-testid={`nav-dot-${item.label.toLowerCase()}`}

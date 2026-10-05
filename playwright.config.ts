@@ -35,6 +35,10 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
+    // Exit and layout animations keep elements in the DOM for a few hundred
+    // ms; reduced motion keeps specs deterministic. animations.spec.ts opts
+    // back in to test the animations themselves.
+    reducedMotion: 'reduce',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [

@@ -17,7 +17,8 @@ import { deleteJSON, patchJSON, postJSON, putJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
-import { pillGroup, pillOption } from '@/components/settings/pills';
+import { pillOption } from '@/components/settings/pills';
+import { PillGroup, PillHighlight } from '@/components/settings/pill-group';
 import { AiDisclosureModal } from '@/components/settings/ai-disclosure-modal';
 import type { AiModelsResult, FrontendAiSettings } from '@/lib/services/aiSettings';
 import type { AiModelSummary } from '@/lib/ai/types';
@@ -303,7 +304,7 @@ export const AiCategorizationSection = ({
             Saving a new provider replaces any existing key
           </div>
         </div>
-        <div className={pillGroup}>
+        <PillGroup>
           {AI_PROVIDERS.map((p) => (
             <button
               key={p}
@@ -312,10 +313,11 @@ export const AiCategorizationSection = ({
               onClick={() => setProvider(p)}
               className={pillOption(provider === p, pending)}
             >
-              {PROVIDER_LABELS[p]}
+              <PillHighlight active={provider === p} />
+              <span className="relative">{PROVIDER_LABELS[p]}</span>
             </button>
           ))}
-        </div>
+        </PillGroup>
       </div>
 
       {/* API key — write-only. Existing key is represented only by the

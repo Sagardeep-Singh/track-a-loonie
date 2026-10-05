@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { AnimatePresence, m } from 'framer-motion';
 import {
   ArrowLeftRight,
   HandCoins,
@@ -25,6 +26,8 @@ import { MatchTransfersDialog } from '@/components/transactions/match-transfers-
 import { StatementPicker } from '@/components/transactions/period-picker';
 import { deleteJSON, getJSON, postJSON, type ApiFailure } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
+import { listItemMotion } from '@/lib/motion/tokens';
+import { useAnimateListChange } from '@/lib/motion/use-animate-list-change';
 import {
   countActiveFilterGroups,
   parseTransactionFilters,
@@ -123,6 +126,9 @@ export const TransactionsView = ({
     const id = searchParams.get('tx');
     return id ? (initialPage.rows.find((t) => t.id === id) ?? null) : null;
   });
+  // Separate from `detail` so the drawer keeps showing the transaction while
+  // it animates closed, instead of emptying out mid-exit.
+  const [detailOpen, setDetailOpen] = useState(() => detail !== null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   const [matchPending, setMatchPending] = useState(false);
@@ -253,12 +259,13 @@ export const TransactionsView = ({
 
   const openDetail = (tx: FrontendTransaction): void => {
     setDetail(tx);
+    setDetailOpen(true);
     setDrawerKey((k) => k + 1);
   };
 
   // Drops `?tx=` on close so a refresh or back navigation doesn't reopen it.
   const closeDetail = (): void => {
-    setDetail(null);
+    setDetailOpen(false);
     const params = new URLSearchParams(window.location.search);
     if (!params.has('tx')) return;
     params.delete('tx');
@@ -424,6 +431,15 @@ export const TransactionsView = ({
     return { rows, dayTotals, runningBalance, days: groupByDay(rows) };
   }, [pages]);
 
+  // A delete or a single edit animates; pagination, filters and search swap
+  // rows instantly.
+  const animateRows = useAnimateListChange(rows.map((t) => t.id));
+  const rowMotion = {
+    ...listItemMotion,
+    layout: animateRows ? listItemMotion.layout : false,
+    initial: animateRows ? listItemMotion.initial : false,
+  } as const;
+
   const renderLoadMore = (tree: Tree): React.ReactElement => (
     <div
       ref={tree === 'desktop' ? desktopLoadMoreRef : mobileLoadMoreRef}
@@ -575,7 +591,7 @@ export const TransactionsView = ({
         data-testid="transactions-list-desktop"
         aria-busy={pending}
         className={cn(
-          'hidden transition-opacity lg:block',
+          'relative hidden transition-opacity lg:block',
           pending && 'pointer-events-none opacity-60',
         )}
       >
@@ -584,96 +600,106 @@ export const TransactionsView = ({
             No transactions match. Log one to get started.
           </p>
         ) : (
-          days.map(([day, dayRows]) => {
-            const dayTotal = dayTotals.get(day) ?? 0;
-            return (
-              <div key={day} className="mt-5.5" data-testid="transaction-day-desktop">
-                <div className="flex items-baseline gap-3 px-0.5 pb-2">
-                  <span className="text-ink-muted font-mono text-xs tracking-[0.06em]">
-                    {formatDate(day)}
-                  </span>
-                  <span className="bg-line h-px flex-1" />
-                  <span
-                    data-testid="transaction-day-total"
-                    className={cn('font-mono text-xs', dayTotal >= 0 ? 'text-sky' : 'text-rose')}
-                  >
-                    {dayTotal >= 0 ? '+' : '−'}
-                    {Math.abs(dayTotal).toFixed(2)}
-                  </span>
-                </div>
-                <div className="border-line bg-paper-raised rounded-[14px] border px-6">
-                  {dayRows.map((t) => (
-                    <div
-                      key={t.id}
-                      onClick={() => openDetail(t)}
-                      className="ledger-row flex cursor-pointer items-center gap-3 py-3.5 lg:gap-5"
+          <AnimatePresence mode="popLayout" initial={false} custom={animateRows}>
+            {days.map(([day, dayRows]) => {
+              const dayTotal = dayTotals.get(day) ?? 0;
+              return (
+                <m.div
+                  key={day}
+                  {...rowMotion}
+                  className="mt-5.5"
+                  data-testid="transaction-day-desktop"
+                >
+                  <div className="flex items-baseline gap-3 px-0.5 pb-2">
+                    <span className="text-ink-muted font-mono text-xs tracking-[0.06em]">
+                      {formatDate(day)}
+                    </span>
+                    <span className="bg-line h-px flex-1" />
+                    <span
+                      data-testid="transaction-day-total"
+                      className={cn('font-mono text-xs', dayTotal >= 0 ? 'text-sky' : 'text-rose')}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">
-                          {t.payee || t.categoryName || 'Transaction'}
-                        </div>
-                        <div className="text-ink-muted mt-0.5 text-xs">{t.accountName}</div>
-                        {/* non-interactive chip: the row already owns the click
+                      {dayTotal >= 0 ? '+' : '−'}
+                      {Math.abs(dayTotal).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="border-line bg-paper-raised relative rounded-[14px] border px-6">
+                    <AnimatePresence mode="popLayout" initial={false} custom={animateRows}>
+                      {dayRows.map((t) => (
+                        <m.div
+                          key={t.id}
+                          {...rowMotion}
+                          onClick={() => openDetail(t)}
+                          className="ledger-row flex cursor-pointer items-center gap-3 py-3.5 lg:gap-5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">
+                              {t.payee || t.categoryName || 'Transaction'}
+                            </div>
+                            <div className="text-ink-muted mt-0.5 text-xs">{t.accountName}</div>
+                            {/* non-interactive chip: the row already owns the click
                           (opens the detail drawer). The link to the history
                           entry lives in that drawer instead. */}
-                        {t.importBatchFilename && (
-                          <div className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]">
-                            <Upload size={11} />
-                            <span className="truncate">{t.importBatchFilename}</span>
-                          </div>
-                        )}
-                        {t.isReimbursable && (
-                          <div className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]">
-                            <HandCoins size={11} />
-                            {t.reimbursementStatus === 'COMPLETE' ? (
-                              <span>Reimbursable · reimbursed</span>
-                            ) : (
-                              <span className="flex items-center gap-1">
-                                Reimbursable ·{' '}
-                                <Money
-                                  value={t.reimbursementOutstanding}
-                                  tone="neutral"
-                                  className="text-[11px]"
-                                />{' '}
-                                pending
-                              </span>
+                            {t.importBatchFilename && (
+                              <div className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]">
+                                <Upload size={11} />
+                                <span className="truncate">{t.importBatchFilename}</span>
+                              </div>
+                            )}
+                            {t.isReimbursable && (
+                              <div className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]">
+                                <HandCoins size={11} />
+                                {t.reimbursementStatus === 'COMPLETE' ? (
+                                  <span>Reimbursable · reimbursed</span>
+                                ) : (
+                                  <span className="flex items-center gap-1">
+                                    Reimbursable ·{' '}
+                                    <Money
+                                      value={t.reimbursementOutstanding}
+                                      tone="neutral"
+                                      className="text-[11px]"
+                                    />{' '}
+                                    pending
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
-                        )}
-                      </div>
-                      <span
-                        className={cn(
-                          'shrink-0 rounded-full px-2.5 py-1 text-[12.5px]',
-                          t.categoryName
-                            ? 'border-line text-ink-muted border'
-                            : 'border-rose bg-rose-soft text-rose border',
-                        )}
-                      >
-                        {t.categoryName ?? 'Uncategorized'}
-                      </span>
-                      <span
-                        className={cn(
-                          'shrink-0 text-right font-mono text-sm tabular-nums lg:w-[100px]',
-                          t.type === 'INCOME' ? 'text-sky' : 'text-rose',
-                        )}
-                      >
-                        {t.type === 'INCOME' ? '+' : '−'}
-                        {Number(t.amount).toFixed(2)}
-                      </span>
-                      {/* Running balance is a desktop-only column: at 402px it squeezed
+                          <span
+                            className={cn(
+                              'shrink-0 rounded-full px-2.5 py-1 text-[12.5px]',
+                              t.categoryName
+                                ? 'border-line text-ink-muted border'
+                                : 'border-rose bg-rose-soft text-rose border',
+                            )}
+                          >
+                            {t.categoryName ?? 'Uncategorized'}
+                          </span>
+                          <span
+                            className={cn(
+                              'shrink-0 text-right font-mono text-sm tabular-nums lg:w-[100px]',
+                              t.type === 'INCOME' ? 'text-sky' : 'text-rose',
+                            )}
+                          >
+                            {t.type === 'INCOME' ? '+' : '−'}
+                            {Number(t.amount).toFixed(2)}
+                          </span>
+                          {/* Running balance is a desktop-only column: at 402px it squeezed
                         the payee cell to zero width. */}
-                      <span
-                        data-testid="running-balance"
-                        className="text-ink-muted hidden w-[86px] shrink-0 text-right font-mono text-xs tabular-nums lg:block"
-                      >
-                        {(runningBalance.get(t.id) ?? 0).toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })
+                          <span
+                            data-testid="running-balance"
+                            className="text-ink-muted hidden w-[86px] shrink-0 text-right font-mono text-xs tabular-nums lg:block"
+                          >
+                            {(runningBalance.get(t.id) ?? 0).toFixed(2)}
+                          </span>
+                        </m.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                </m.div>
+              );
+            })}
+          </AnimatePresence>
         )}
         {renderLoadMore('desktop')}
       </div>
@@ -749,71 +775,76 @@ export const TransactionsView = ({
           ref={mobileListRef}
           data-testid="transactions-list-mobile"
           aria-busy={pending}
-          className={cn('transition-opacity', pending && 'pointer-events-none opacity-60')}
+          className={cn('relative transition-opacity', pending && 'pointer-events-none opacity-60')}
         >
           {rows.length === 0 ? (
             <p className="text-ink-muted mt-6 text-sm">
               No transactions match. Log one to get started.
             </p>
           ) : (
-            days.map(([day, dayRows]) => {
-              const dayTotal = dayTotals.get(day) ?? 0;
-              return (
-                <div key={day} className="mt-5">
-                  <div className="flex items-baseline justify-between gap-2.5 px-0.5 pb-2">
-                    <span className="text-ink-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
-                      {formatDate(day)}
-                    </span>
-                    <Money
-                      value={dayTotal}
-                      tone={dayTotal >= 0 ? 'income' : 'expense'}
-                      className="text-[11.5px]"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {dayRows.map((t) => (
-                      <div
-                        key={t.id}
-                        data-testid="transaction-row-mobile"
-                        onClick={() => openDetail(t)}
-                        className="border-line bg-paper-raised cursor-pointer rounded-2xl border p-3.5"
-                      >
-                        <div className="flex items-baseline justify-between gap-3">
-                          <span className="truncate text-[15.5px] font-semibold tracking-[-0.01em]">
-                            {t.payee || t.categoryName || 'Transaction'}
-                          </span>
-                          <Money
-                            value={t.amount}
-                            tone={t.type === 'INCOME' ? 'income' : 'expense'}
-                            className="shrink-0 text-[15.5px]"
-                          />
-                        </div>
-                        <div className="mt-2.5 flex items-center justify-between gap-2.5">
-                          <span className="text-ink-muted min-w-0 truncate text-xs">
-                            {t.accountName}
-                          </span>
-                          {t.categoryName ? (
-                            <span
-                              className="shrink-0 rounded-full px-2.75 py-1 text-xs font-medium"
-                              style={{
-                                background: `color-mix(in srgb, ${categoryColorVar(t.categoryName)} 20%, var(--paper-raised))`,
-                                color: categoryColorVar(t.categoryName),
-                              }}
-                            >
-                              {t.categoryName}
-                            </span>
-                          ) : (
-                            <span className="border-line bg-paper text-ink-muted shrink-0 rounded-full border border-dashed px-2.75 py-1.5 text-xs font-medium">
-                              Uncategorized
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })
+            <AnimatePresence mode="popLayout" initial={false} custom={animateRows}>
+              {days.map(([day, dayRows]) => {
+                const dayTotal = dayTotals.get(day) ?? 0;
+                return (
+                  <m.div key={day} {...rowMotion} className="mt-5">
+                    <div className="flex items-baseline justify-between gap-2.5 px-0.5 pb-2">
+                      <span className="text-ink-muted text-[11px] font-semibold tracking-[0.06em] uppercase">
+                        {formatDate(day)}
+                      </span>
+                      <Money
+                        value={dayTotal}
+                        tone={dayTotal >= 0 ? 'income' : 'expense'}
+                        className="text-[11.5px]"
+                      />
+                    </div>
+                    <div className="relative flex flex-col gap-2">
+                      <AnimatePresence mode="popLayout" initial={false} custom={animateRows}>
+                        {dayRows.map((t) => (
+                          <m.div
+                            key={t.id}
+                            {...rowMotion}
+                            data-testid="transaction-row-mobile"
+                            onClick={() => openDetail(t)}
+                            className="border-line bg-paper-raised cursor-pointer rounded-2xl border p-3.5"
+                          >
+                            <div className="flex items-baseline justify-between gap-3">
+                              <span className="truncate text-[15.5px] font-semibold tracking-[-0.01em]">
+                                {t.payee || t.categoryName || 'Transaction'}
+                              </span>
+                              <Money
+                                value={t.amount}
+                                tone={t.type === 'INCOME' ? 'income' : 'expense'}
+                                className="shrink-0 text-[15.5px]"
+                              />
+                            </div>
+                            <div className="mt-2.5 flex items-center justify-between gap-2.5">
+                              <span className="text-ink-muted min-w-0 truncate text-xs">
+                                {t.accountName}
+                              </span>
+                              {t.categoryName ? (
+                                <span
+                                  className="shrink-0 rounded-full px-2.75 py-1 text-xs font-medium"
+                                  style={{
+                                    background: `color-mix(in srgb, ${categoryColorVar(t.categoryName)} 20%, var(--paper-raised))`,
+                                    color: categoryColorVar(t.categoryName),
+                                  }}
+                                >
+                                  {t.categoryName}
+                                </span>
+                              ) : (
+                                <span className="border-line bg-paper text-ink-muted shrink-0 rounded-full border border-dashed px-2.75 py-1.5 text-xs font-medium">
+                                  Uncategorized
+                                </span>
+                              )}
+                            </div>
+                          </m.div>
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </m.div>
+                );
+              })}
+            </AnimatePresence>
           )}
           {renderLoadMore('mobile')}
         </div>
@@ -832,7 +863,12 @@ export const TransactionsView = ({
         />
       </Drawer>
 
-      <Drawer key={`drawer-${drawerKey}`} open={!!detail} onClose={closeDetail} title="Transaction">
+      <Drawer
+        key={`drawer-${drawerKey}`}
+        open={detailOpen}
+        onClose={closeDetail}
+        title="Transaction"
+      >
         {detail && (
           <>
             <div className="font-display mt-4 text-[22px] font-semibold tracking-[-0.02em]">

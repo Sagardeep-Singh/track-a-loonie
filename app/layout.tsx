@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Space_Grotesk, Inter, IBM_Plex_Mono } from 'next/font/google';
 import { ThemeInit } from '@/components/settings/theme-init';
 import { ServiceWorkerRegister } from '@/components/pwa/service-worker-register';
+import { MotionProvider } from '@/components/motion/motion-provider';
 import { APPEARANCES, APPEARANCE_KEY, PALETTES, PALETTE_KEY } from '@/lib/preferences';
 import './globals.css';
 
@@ -52,7 +53,7 @@ const RootLayout = ({ children }: { children: React.ReactNode }): React.ReactEle
     <body className="flex min-h-full flex-col antialiased">
       <ThemeInit />
       <ServiceWorkerRegister />
-      {children}
+      <MotionProvider>{children}</MotionProvider>
     </body>
   </html>
 );

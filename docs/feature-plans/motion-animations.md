@@ -24,9 +24,9 @@ Preview of the intended feel, built for the CSS vs motion comparison: https://cl
 - Animated charts beyond rings and bars (pie slices, trends stacked bar). Can follow later if the base setup works well.
 - Gestures other than swipe to dismiss (no swipe-to-delete rows).
 
-## Open questions
+## Decisions
 
-Defaults below are what this plan assumes. Confirm or change before implementation starts.
+All three went with the default.
 
 1. **Swipe to dismiss on the mobile Drawer too?** Below `lg` the Drawer is full screen (Log a transaction, transaction detail). Default: **no**, only BottomSheet, since a full-screen form with scrolling content fights a vertical drag.
 2. **Transactions list row animation.** Rows change after delete from the detail Drawer via `router.refresh()`. Default: **animate single-row removal only**, and skip whenever more than 3 rows change at once (pagination, filters).
@@ -109,11 +109,20 @@ Note: `transactions-view.tsx` remounts the detail Drawer with `key={drawer-${dra
 
 `MotionConfig reducedMotion="user"` disables transform and layout animations for users who ask for reduced motion. The CSS rule in `globals.css` stays for the remaining CSS animations. Count-up jumps straight to the final value when `useReducedMotion()` is true.
 
+## Implementation notes (deviations from the design above)
+
+- **Package: `framer-motion` instead of `motion`.** Same library and version (`motion@14.0.0` is a wrapper that pins `framer-motion@14.0.0`). The `motion/react` entry reads `motion`/`m` off a namespace import of `framer-motion`, which stops Turbopack tree-shaking: login's first-load JS grew by ~49 KB gzipped with the drag and layout features bundled eagerly. Importing `framer-motion` directly brings that to ~18 KB, with `domMax` (~38 KB) loading lazily as planned. ESLint blocks `motion/react` and the full `motion` component.
+- **Bundle budget missed.** Measured on `/login` and `/signup` (gzipped JS from the server HTML, `nomodule` polyfills excluded): main 141.5 KB, this branch 160.0 KB, so **+18.5 KB** against the +6 KB target. That's the `m` runtime, `AnimatePresence`, `LayoutGroup` and `MotionConfig`, which Turbopack doesn't shake as tightly as esbuild (~9 KB there). `optimizePackageImports` made no difference.
+- **Card stagger is CSS (`.stagger-item` in `globals.css`), not a motion `<Stagger>`.** A motion `initial` puts `opacity: 0` in the server HTML, so cards would stay invisible until JS and the lazy features load. The CSS keyframe plays straight from the HTML.
+- **`AnimatedMoney` uses `requestAnimationFrame`, not `useSpring`.** `useSpring` pulls the animation engine into first-load JS. Its visible text is `aria-hidden` and a `sr-only` copy carries the real value.
+- **Rings and the count-up start from empty/$0.00 in the server HTML** and animate once hydrated. Non-transform animations (rings, bars, count-up) go through `useReducedTransition` / `useReducedMotion`, since `MotionConfig reducedMotion="user"` only skips transforms and layout.
+- **List animation is gated with `useAnimateListChange`** (built on `isSmallListChange`) on Transactions and Rules (search filtering), passed through `AnimatePresence custom` so items already leaving vanish instantly on a big change. Lists use `mode="popLayout"` so the rows below move while the removed one fades.
+- **Drawer content stays mounted through the exit.** `transactions-view.tsx` now keeps `detail` while a separate `detailOpen` drives the drawer, and `add-transaction-overlay.tsx` no longer gates the drawer's form on `open` (the drawer unmounts its children after exit).
+- **Not done:** backdrop opacity following the sheet drag (kept simple), and budget page progress bars (the budgets view has rings, not bars; trends bars and rings are animated).
+
 ## Test plan
 
-### Unit (`tests/unit/lib/motion/`)
-
-`list.test.ts`
+### Unit (`tests/unit/lib/motion-list.test.ts`)
 
 - `isSmallListChange`: identical lists → true; one removed → true; one added → true; 3 changed → true; 4 changed → false; full swap (new page) → false; empty to empty → true; custom `max` respected.
 - `shouldDismissSheet`: offset 71 / velocity 0 → true; offset 69 / velocity 0 → false; offset 10 / velocity 600 → true; negative offset (dragged up) with high upward velocity → false; exactly at thresholds → document and assert the chosen boundary.
@@ -128,31 +137,31 @@ Note: `transactions-view.tsx` remounts the detail Drawer with `key={drawer-${dra
 
 ### Manual checks
 
-- Lighthouse / `next build` output: first-load JS per route within the +6 KB budget.
+- First-load JS per route within the +6 KB budget (missed, see implementation notes).
 - Mobile Safari: sheet drag doesn't trigger page pull-to-refresh, safe-area padding intact while dragging.
 - Dark mode and all three palettes: nav indicator and pill backgrounds use tokens, no hard-coded colors.
 
 ## Checklist
 
-- [ ] Resolve open questions 1 to 3
-- [ ] `npm install motion` and confirm the version in `package.json`
-- [ ] `lib/motion/features.ts`, `lib/motion/tokens.ts`, `lib/motion/list.ts`
-- [ ] Unit tests for `lib/motion/list.ts`
-- [ ] `components/motion/motion-provider.tsx`, mounted in `app/layout.tsx`
-- [ ] ESLint `no-restricted-imports` rule: disallow importing `motion` from `motion/react` (use `m`)
-- [ ] Drawer enter/exit
-- [ ] BottomSheet enter/exit + drag to dismiss
-- [ ] Toast enter/exit + `AnimatePresence` at categorize call sites
-- [ ] Categorize rows and payee groups layout + exit
-- [ ] Rules list layout + exit
-- [ ] Transactions rows (small changes only)
-- [ ] Ring fill animation
-- [ ] `AnimatedMoney` count-up on dashboard hero and budget cards
-- [ ] Budget and trends bars grow
-- [ ] `Stagger` for dashboard, budgets and accounts card grids
-- [ ] Bottom nav and sidebar active indicator
-- [ ] Settings pill group indicator
-- [ ] `playwright.config.ts` global `reducedMotion: 'reduce'`
-- [ ] `tests/e2e/animations.spec.ts`
-- [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
-- [ ] Bundle size check against the +6 KB budget
+- [x] Resolve open questions 1 to 3 (defaults)
+- [x] Install the library (`framer-motion@^14.0.0`, see implementation notes)
+- [x] `lib/motion/features.ts`, `lib/motion/tokens.ts`, `lib/motion/list.ts`
+- [x] Unit tests for `lib/motion/list.ts`
+- [x] `components/motion/motion-provider.tsx`, mounted in `app/layout.tsx`
+- [x] ESLint `no-restricted-imports` rule: no full `motion` component, no `motion/react`
+- [x] Drawer enter/exit
+- [x] BottomSheet enter/exit + drag to dismiss
+- [x] Toast enter/exit + `AnimatePresence` at categorize call sites
+- [x] Categorize rows and payee groups layout + exit
+- [x] Rules list layout + exit
+- [x] Transactions rows (small changes only)
+- [x] Ring fill animation
+- [x] `AnimatedMoney` count-up on dashboard hero and budget card amounts
+- [x] Trends bars grow (`GrowBar`), budget rings fill
+- [x] CSS stagger for dashboard budget rings, budget cards and account cards
+- [x] Bottom nav and sidebar active indicator
+- [x] Settings pill group indicator
+- [x] `playwright.config.ts` global `reducedMotion: 'reduce'`
+- [x] `tests/e2e/animations.spec.ts`
+- [x] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
+- [ ] Bundle size within +6 KB (measured +18.5 KB, needs a decision)

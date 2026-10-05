@@ -2,13 +2,17 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { m } from 'framer-motion';
 import Link from 'next/link';
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Select } from '@/components/ui/field';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { AnimatedMoney } from '@/components/ui/animated-money';
 import { patchJSON, postJSON, deleteJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
+import { spring } from '@/lib/motion/tokens';
+import { useReducedTransition } from '@/lib/motion/use-reduced-transition';
 import { daysInMonth } from '@/lib/date';
 import { monthToRange } from '@/lib/period-selection';
 import { transactionsHref } from '@/lib/transactions/transaction-filters';
@@ -60,6 +64,9 @@ const BudgetRing = ({ fraction }: { fraction: number }): React.ReactElement => {
   const innerStroke = 4.5;
   const innerC = 2 * Math.PI * innerR;
   const excess = Math.min(Math.max(fraction - 1, 0), 1);
+  // Outer ring fills first; the overage ring follows once it's full.
+  const fillTransition = useReducedTransition(spring.smooth);
+  const overageTransition = useReducedTransition({ ...spring.smooth, delay: 0.35 });
 
   return (
     <div className="size-[84px] shrink-0">
@@ -72,7 +79,7 @@ const BudgetRing = ({ fraction }: { fraction: number }): React.ReactElement => {
           stroke="var(--paper-sunk)"
           strokeWidth={outerStroke}
         />
-        <circle
+        <m.circle
           cx="42"
           cy="42"
           r={outerR}
@@ -80,7 +87,9 @@ const BudgetRing = ({ fraction }: { fraction: number }): React.ReactElement => {
           stroke={color}
           strokeWidth={outerStroke}
           strokeLinecap={over ? undefined : 'round'}
-          strokeDasharray={`${outerC * Math.min(fraction, 1)} ${outerC}`}
+          initial={{ strokeDasharray: `0 ${outerC}` }}
+          animate={{ strokeDasharray: `${outerC * Math.min(fraction, 1)} ${outerC}` }}
+          transition={fillTransition}
           transform="rotate(-90 42 42)"
         />
         {over && (
@@ -93,7 +102,7 @@ const BudgetRing = ({ fraction }: { fraction: number }): React.ReactElement => {
               stroke="var(--rose-soft)"
               strokeWidth={innerStroke}
             />
-            <circle
+            <m.circle
               cx="42"
               cy="42"
               r={innerR}
@@ -101,7 +110,9 @@ const BudgetRing = ({ fraction }: { fraction: number }): React.ReactElement => {
               stroke="var(--rose)"
               strokeWidth={innerStroke}
               strokeLinecap="round"
-              strokeDasharray={`${innerC * excess} ${innerC}`}
+              initial={{ strokeDasharray: `0 ${innerC}` }}
+              animate={{ strokeDasharray: `${innerC * excess} ${innerC}` }}
+              transition={overageTransition}
               transform="rotate(-90 42 42)"
             />
           </>
@@ -292,7 +303,7 @@ export const BudgetsView = ({
 
           {initialBudgets.length > 0 && (
             <div className="mt-4.5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {initialBudgets.map((budget) => {
+              {initialBudgets.map((budget, index) => {
                 const limit = Number(budget.limitAmount);
                 const spent = Number(budget.spent);
                 const fraction = limit > 0 ? spent / limit : 0;
@@ -302,7 +313,8 @@ export const BudgetsView = ({
                 return (
                   <div
                     key={budget.id}
-                    className="border-line bg-paper-raised hover:border-iris relative flex items-center gap-5.5 rounded-2xl border p-5.5 transition-colors"
+                    style={{ '--i': index } as React.CSSProperties}
+                    className="stagger-item border-line bg-paper-raised hover:border-iris relative flex items-center gap-5.5 rounded-2xl border p-5.5 transition-colors"
                   >
                     <BudgetRing fraction={fraction} />
                     <div className="min-w-0 flex-1">
@@ -322,9 +334,15 @@ export const BudgetsView = ({
                         {budget.categoryName}
                       </Link>
                       <div className={cn('font-display mt-1 text-lg font-semibold', toneClass)}>
-                        {over
-                          ? `Over by $${(spent - limit).toFixed(2)}`
-                          : `$${(limit - spent).toFixed(2)} left`}
+                        {over ? (
+                          <>
+                            Over by <AnimatedMoney value={spent - limit} />
+                          </>
+                        ) : (
+                          <>
+                            <AnimatedMoney value={limit - spent} /> left
+                          </>
+                        )}
                       </div>
                       <div className="text-ink-muted mt-1 font-mono text-[12.5px] tabular-nums">
                         ${spent.toFixed(2)} of ${limit.toFixed(2)}
