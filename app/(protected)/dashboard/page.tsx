@@ -18,6 +18,13 @@ import {
 } from '@/lib/dashboard/drilldown';
 import { cn } from '@/lib/cn';
 import { getStoredPeriod } from '@/lib/period-cookie';
+import { getBudgetSettings, getZbbOverview } from '@/lib/services/zeroBased';
+import {
+  ZbbAllocationCard,
+  ZbbHealthCard,
+  ZbbHeroCard,
+  ZbbSuggestionsCard,
+} from '@/components/dashboard/zero-based-overview';
 import { selectionMonth } from '@/lib/period-selection';
 
 const money = (value: string): string =>
@@ -50,10 +57,24 @@ const DashboardPage = async ({
   const storedMonth = month
     ? undefined
     : selectionMonth(await getStoredPeriod(), currentMonthNum());
-  const data = await getOverviewData(userId, {
-    day: day ? Number(day) : undefined,
-    month: month ? Number(month) : storedMonth,
-  });
+  const [data, budgetSettings] = await Promise.all([
+    getOverviewData(userId, {
+      day: day ? Number(day) : undefined,
+      month: month ? Number(month) : storedMonth,
+    }),
+    getBudgetSettings(userId),
+  ]);
+  // zero-based mode swaps the limits hero and budget rings for its own cards;
+  // months before zero-based started fall back to the limits layout
+  const zbb =
+    budgetSettings.mode === 'ZERO_BASED' &&
+    budgetSettings.zbbStartMonth !== null &&
+    data.month >= budgetSettings.zbbStartMonth
+      ? await getZbbOverview(userId, data.month)
+      : null;
+  const zbbMonthShort = RANGE_MONTH.format(
+    new Date(Date.UTC(Math.floor(data.month / 100), (data.month % 100) - 1, 1)),
+  );
   const {
     hero,
     budgetRings,
@@ -134,6 +155,7 @@ const DashboardPage = async ({
   );
 
   const isEmpty =
+    !zbb &&
     budgetRings.length === 0 &&
     Number(hero.income) === 0 &&
     Number(hero.expense) === 0 &&
@@ -204,118 +226,128 @@ const DashboardPage = async ({
         ) : (
           <div className="hidden items-start gap-5 lg:mt-6.5 lg:grid lg:grid-cols-[1.5fr_1fr]">
             <div className="flex min-w-0 flex-col gap-5">
-              <div className="border-line bg-paper-raised rounded-[18px] border p-6.5">
-                <div className="flex items-center gap-7.5">
-                  <div className="shrink-0">
-                    <Ring size="hero" fraction={hero.usedFraction}>
-                      {heroRingLabel('text-[21px]')}
-                    </Ring>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-ink-muted text-[11px] font-semibold tracking-[0.08em] uppercase">
-                      {hero.leftLabel}
-                    </div>
-                    <div className="mt-2 font-mono text-[40px] leading-none font-medium tracking-[-0.03em]">
-                      {hero.hasBudget ? <AnimatedMoney value={Number(hero.leftAmount)} /> : '—'}
-                    </div>
-                    <div className="text-ink-muted mt-2 text-[13.5px]">
-                      {hero.hasBudget ? (
-                        <>
-                          {hero.metaLine} ·{' '}
-                          <span className="text-ink font-mono">{money(hero.paceAmount)}</span>{' '}
-                          {hero.paceTail}
-                        </>
-                      ) : (
-                        <>
-                          {hero.metaLine} · {hero.paceTail}
-                        </>
-                      )}
-                    </div>
-                    <div className="border-line mt-4.5 flex flex-wrap gap-x-6.5 gap-y-3 border-t pt-4 lg:flex-nowrap">
-                      <Link href={overviewIncomeHref(data.month)} className="group">
-                        <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
-                          In
-                        </div>
-                        <div className="text-sky mt-1.5 font-mono text-lg tabular-nums group-hover:underline">
-                          {money(hero.income)}
-                        </div>
-                      </Link>
-                      <Link href={overviewExpenseHref(data.month)} className="group">
-                        <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
-                          Out
-                        </div>
-                        <div className="text-rose mt-1.5 font-mono text-lg tabular-nums group-hover:underline">
-                          {money(hero.expense)}
-                        </div>
-                      </Link>
-                      <Link href={overviewNetHref(data.month)} className="group">
-                        <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
-                          Net
-                        </div>
-                        <div className="mt-1.5 font-mono text-lg tabular-nums group-hover:underline">
-                          {money(hero.net)}
-                        </div>
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-                <div
-                  className={cn(
-                    'mt-5 rounded-xl px-4 py-2.5 text-[13px] leading-snug',
-                    hero.paceTone === 'rose'
-                      ? 'bg-rose-soft text-rose'
-                      : hero.paceTone === 'sky'
-                        ? 'bg-sky-soft text-sky'
-                        : 'bg-paper-sunk text-ink-muted',
-                  )}
-                >
-                  {hero.paceNote}
-                </div>
-              </div>
-
-              <div className="border-line bg-paper-raised rounded-[18px] border p-5.5">
-                <div className="mb-4.5 flex items-baseline justify-between">
-                  <h2 className="font-display text-base font-semibold">Budgets</h2>
-                  <span className="text-ink-muted text-xs">share of each limit used</span>
-                </div>
-                {budgetRings.length === 0 ? (
-                  <p className="text-ink-muted text-sm">
-                    No budgets set for this month yet.{' '}
-                    <Link href="/budgets" className="text-iris font-medium">
-                      Set one
-                    </Link>
-                    .
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-4 gap-2.5">
-                    {budgetRings.map((r, index) => (
-                      <Link
-                        key={r.id}
-                        style={{ '--i': index } as React.CSSProperties}
-                        href={overviewCategoryHref(data.month, [r.categoryId])}
-                        className="stagger-item hover:bg-paper flex flex-col items-center gap-2.5 rounded-xl py-1.5"
-                      >
-                        <Ring size="category" fraction={r.fraction}>
-                          <span className="font-mono text-sm">{r.pctLabel}</span>
+              {zbb ? (
+                <>
+                  <ZbbHeroCard data={zbb} />
+                  <ZbbSuggestionsCard data={zbb} />
+                  <ZbbHealthCard data={zbb} monthShortLabel={zbbMonthShort} />
+                </>
+              ) : (
+                <>
+                  <div className="border-line bg-paper-raised rounded-[18px] border p-6.5">
+                    <div className="flex items-center gap-7.5">
+                      <div className="shrink-0">
+                        <Ring size="hero" fraction={hero.usedFraction}>
+                          {heroRingLabel('text-[21px]')}
                         </Ring>
-                        <div className="text-center text-[12.5px] leading-tight">
-                          {r.categoryName}
-                          <br />
-                          <span
-                            className={cn(
-                              'font-mono text-xs',
-                              r.over ? 'text-rose' : 'text-ink-muted',
-                            )}
-                          >
-                            {money(r.left.replace('Over by ', ''))}
-                            {r.over && ' over'}
-                          </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-ink-muted text-[11px] font-semibold tracking-[0.08em] uppercase">
+                          {hero.leftLabel}
                         </div>
-                      </Link>
-                    ))}
+                        <div className="mt-2 font-mono text-[40px] leading-none font-medium tracking-[-0.03em]">
+                          {hero.hasBudget ? <AnimatedMoney value={Number(hero.leftAmount)} /> : '—'}
+                        </div>
+                        <div className="text-ink-muted mt-2 text-[13.5px]">
+                          {hero.hasBudget ? (
+                            <>
+                              {hero.metaLine} ·{' '}
+                              <span className="text-ink font-mono">{money(hero.paceAmount)}</span>{' '}
+                              {hero.paceTail}
+                            </>
+                          ) : (
+                            <>
+                              {hero.metaLine} · {hero.paceTail}
+                            </>
+                          )}
+                        </div>
+                        <div className="border-line mt-4.5 flex flex-wrap gap-x-6.5 gap-y-3 border-t pt-4 lg:flex-nowrap">
+                          <Link href={overviewIncomeHref(data.month)} className="group">
+                            <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
+                              In
+                            </div>
+                            <div className="text-sky mt-1.5 font-mono text-lg tabular-nums group-hover:underline">
+                              {money(hero.income)}
+                            </div>
+                          </Link>
+                          <Link href={overviewExpenseHref(data.month)} className="group">
+                            <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
+                              Out
+                            </div>
+                            <div className="text-rose mt-1.5 font-mono text-lg tabular-nums group-hover:underline">
+                              {money(hero.expense)}
+                            </div>
+                          </Link>
+                          <Link href={overviewNetHref(data.month)} className="group">
+                            <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
+                              Net
+                            </div>
+                            <div className="mt-1.5 font-mono text-lg tabular-nums group-hover:underline">
+                              {money(hero.net)}
+                            </div>
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        'mt-5 rounded-xl px-4 py-2.5 text-[13px] leading-snug',
+                        hero.paceTone === 'rose'
+                          ? 'bg-rose-soft text-rose'
+                          : hero.paceTone === 'sky'
+                            ? 'bg-sky-soft text-sky'
+                            : 'bg-paper-sunk text-ink-muted',
+                      )}
+                    >
+                      {hero.paceNote}
+                    </div>
                   </div>
-                )}
-              </div>
+
+                  <div className="border-line bg-paper-raised rounded-[18px] border p-5.5">
+                    <div className="mb-4.5 flex items-baseline justify-between">
+                      <h2 className="font-display text-base font-semibold">Budgets</h2>
+                      <span className="text-ink-muted text-xs">share of each limit used</span>
+                    </div>
+                    {budgetRings.length === 0 ? (
+                      <p className="text-ink-muted text-sm">
+                        No budgets set for this month yet.{' '}
+                        <Link href="/budgets" className="text-iris font-medium">
+                          Set one
+                        </Link>
+                        .
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-4 gap-2.5">
+                        {budgetRings.map((r, index) => (
+                          <Link
+                            key={r.id}
+                            style={{ '--i': index } as React.CSSProperties}
+                            href={overviewCategoryHref(data.month, [r.categoryId])}
+                            className="stagger-item hover:bg-paper flex flex-col items-center gap-2.5 rounded-xl py-1.5"
+                          >
+                            <Ring size="category" fraction={r.fraction}>
+                              <span className="font-mono text-sm">{r.pctLabel}</span>
+                            </Ring>
+                            <div className="text-center text-[12.5px] leading-tight">
+                              {r.categoryName}
+                              <br />
+                              <span
+                                className={cn(
+                                  'font-mono text-xs',
+                                  r.over ? 'text-rose' : 'text-ink-muted',
+                                )}
+                              >
+                                {money(r.left.replace('Over by ', ''))}
+                                {r.over && ' over'}
+                              </span>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
 
               <div className="border-line bg-paper-raised rounded-[18px] border p-5.5">
                 <div className="mb-4.5 flex items-baseline justify-between">
@@ -342,6 +374,7 @@ const DashboardPage = async ({
             </div>
 
             <div className="flex min-w-0 flex-col gap-5">
+              {zbb && <ZbbAllocationCard data={zbb} />}
               <div data-testid="day-panel-desktop">
                 <DayPanel
                   month={data.month}
@@ -413,52 +446,59 @@ const DashboardPage = async ({
 
         {!isEmpty && (
           <div className="mt-5 flex flex-col gap-3 lg:hidden">
-            <div className="border-line bg-paper-raised rounded-[18px] border p-4.5">
-              <div className="flex items-center gap-4.5">
-                <div className="shrink-0">
-                  <Ring size="hero-mobile" fraction={hero.usedFraction}>
-                    <span className="font-mono text-lg font-medium">
-                      {Math.round(Math.min(hero.usedFraction, 1) * 100)}%
-                    </span>
-                    <span className="text-ink-muted mt-0.5 text-[9px] tracking-[0.08em] uppercase">
-                      of budget
-                    </span>
-                  </Ring>
-                </div>
-                <div className="min-w-0">
-                  {hero.hasBudget && (
-                    <div className="mb-1 flex items-center gap-1.5">
-                      <span
-                        className={cn(
-                          'size-1.5 rounded-full',
-                          hero.paceTone === 'rose' ? 'bg-rose' : 'bg-iris',
-                        )}
-                      />
-                      <span
-                        className={cn(
-                          'text-[11px] font-semibold tracking-[0.04em] uppercase',
-                          hero.paceTone === 'rose' ? 'text-rose' : 'text-iris',
-                        )}
-                      >
-                        {hero.paceTone === 'rose' ? 'Over pace' : 'On pace'}
+            {zbb ? (
+              <>
+                <ZbbHeroCard data={zbb} />
+                <ZbbSuggestionsCard data={zbb} />
+              </>
+            ) : (
+              <div className="border-line bg-paper-raised rounded-[18px] border p-4.5">
+                <div className="flex items-center gap-4.5">
+                  <div className="shrink-0">
+                    <Ring size="hero-mobile" fraction={hero.usedFraction}>
+                      <span className="font-mono text-lg font-medium">
+                        {Math.round(Math.min(hero.usedFraction, 1) * 100)}%
                       </span>
-                    </div>
-                  )}
-                  <div className="font-display text-[20px] leading-[1.2] font-semibold tracking-[-0.01em]">
-                    {hero.hasBudget ? (
-                      <>
-                        {hero.leftLabel} <AnimatedMoney value={Number(hero.leftAmount)} />
-                      </>
-                    ) : (
-                      'No budget set'
-                    )}
+                      <span className="text-ink-muted mt-0.5 text-[9px] tracking-[0.08em] uppercase">
+                        of budget
+                      </span>
+                    </Ring>
                   </div>
-                  <p className="text-ink-muted mt-1.5 text-[12.5px] leading-snug">
-                    {hero.paceNote}
-                  </p>
+                  <div className="min-w-0">
+                    {hero.hasBudget && (
+                      <div className="mb-1 flex items-center gap-1.5">
+                        <span
+                          className={cn(
+                            'size-1.5 rounded-full',
+                            hero.paceTone === 'rose' ? 'bg-rose' : 'bg-iris',
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            'text-[11px] font-semibold tracking-[0.04em] uppercase',
+                            hero.paceTone === 'rose' ? 'text-rose' : 'text-iris',
+                          )}
+                        >
+                          {hero.paceTone === 'rose' ? 'Over pace' : 'On pace'}
+                        </span>
+                      </div>
+                    )}
+                    <div className="font-display text-[20px] leading-[1.2] font-semibold tracking-[-0.01em]">
+                      {hero.hasBudget ? (
+                        <>
+                          {hero.leftLabel} <AnimatedMoney value={Number(hero.leftAmount)} />
+                        </>
+                      ) : (
+                        'No budget set'
+                      )}
+                    </div>
+                    <p className="text-ink-muted mt-1.5 text-[12.5px] leading-snug">
+                      {hero.paceNote}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {triage.total > 0 && (
               <div className="border-iris bg-iris-soft rounded-[18px] border p-4">
@@ -509,41 +549,48 @@ const DashboardPage = async ({
               </p>
             </div>
 
-            {budgetRings.length > 0 && (
-              <div className="border-line bg-paper-raised rounded-[18px] border p-4">
-                <div className="mb-3.5 flex items-baseline justify-between gap-2.5">
-                  <span className="font-display text-base font-semibold">Budgets</span>
-                  <Link href="/budgets" className="text-iris text-[11.5px] font-medium">
-                    See all
-                  </Link>
+            {zbb ? (
+              <>
+                <ZbbAllocationCard data={zbb} />
+                <ZbbHealthCard data={zbb} monthShortLabel={zbbMonthShort} />
+              </>
+            ) : (
+              budgetRings.length > 0 && (
+                <div className="border-line bg-paper-raised rounded-[18px] border p-4">
+                  <div className="mb-3.5 flex items-baseline justify-between gap-2.5">
+                    <span className="font-display text-base font-semibold">Budgets</span>
+                    <Link href="/budgets" className="text-iris text-[11.5px] font-medium">
+                      See all
+                    </Link>
+                  </div>
+                  <div className="flex flex-col gap-3.5">
+                    {budgetRings.map((r) => {
+                      const alert = r.fraction > 0.85;
+                      return (
+                        <Link
+                          key={r.id}
+                          href={overviewCategoryHref(data.month, [r.categoryId])}
+                          className="block"
+                        >
+                          <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                            <span className="font-medium">{r.categoryName}</span>
+                            <span className={cn('font-mono', alert ? 'text-rose' : 'text-iris')}>
+                              {money(r.left.replace('Over by ', ''))}
+                              {r.over ? ' over' : ' left'}
+                            </span>
+                          </div>
+                          <div className="bg-paper-sunk mt-1.5 flex h-1.5 overflow-hidden rounded-full">
+                            <span
+                              className={cn('block', alert ? 'bg-rose' : 'bg-iris')}
+                              style={{ width: `${Math.round(Math.min(r.fraction, 1) * 100)}%` }}
+                            />
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="flex flex-col gap-3.5">
-                  {budgetRings.map((r) => {
-                    const alert = r.fraction > 0.85;
-                    return (
-                      <Link
-                        key={r.id}
-                        href={overviewCategoryHref(data.month, [r.categoryId])}
-                        className="block"
-                      >
-                        <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                          <span className="font-medium">{r.categoryName}</span>
-                          <span className={cn('font-mono', alert ? 'text-rose' : 'text-iris')}>
-                            {money(r.left.replace('Over by ', ''))}
-                            {r.over ? ' over' : ' left'}
-                          </span>
-                        </div>
-                        <div className="bg-paper-sunk mt-1.5 flex h-1.5 overflow-hidden rounded-full">
-                          <span
-                            className={cn('block', alert ? 'bg-rose' : 'bg-iris')}
-                            style={{ width: `${Math.round(Math.min(r.fraction, 1) * 100)}%` }}
-                          />
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
+              )
             )}
           </div>
         )}

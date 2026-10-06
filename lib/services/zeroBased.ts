@@ -1,8 +1,14 @@
 import { computeZbbMonth, targetTopUps, type ZbbCell } from '@/lib/budgets/zero-based-math';
-import { monthOfDate, monthRange, shiftMonth } from '@/lib/date';
+import {
+  buildZbbInsights,
+  type AllocationSlice,
+  type CategoryHealth,
+  type Suggestion,
+} from '@/lib/budgets/zero-based-insights';
+import { daysInMonth, monthOfDate, monthRange, shiftMonth } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { currentMonthNumber } from '@/lib/format';
-import { getEffectiveLimits, listBudgets, type FrontendBudget } from '@/lib/services/budgets';
+import { getEffectiveLimits } from '@/lib/services/budgets';
 import { ServiceValidationError } from '@/lib/services/common';
 import {
   fromCents,
@@ -399,35 +405,103 @@ export const assignToTargets = async (userId: string, month: number): Promise<Fr
   return getZbbMonth(userId, month);
 };
 
+export type FrontendZbbOverview = {
+  month: number;
+  startMonth: number;
+  readyToAssign: string;
+  /** on-budget income (not transfers or card payments) dated in `month` */
+  incomeThisMonth: string;
+  assignedThisMonth: string;
+  spentThisMonth: string;
+  /** sum of every category's available, negatives included */
+  availableTotal: string;
+  nextMonthAssigned: string;
+  overspent: string;
+  targetShortfall: string;
+  /** cents, so the screen can size bars without re-parsing strings */
+  health: CategoryHealth[];
+  allocation: AllocationSlice[];
+  suggestions: Suggestion[];
+};
+
+const SHORT_MONTH = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short' });
+const LONG_MONTH = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'long' });
+
 /**
- * The month's budgets in the shape the limits mode uses, for screens (the
- * dashboard rings) that only need "how much could be spent vs how much was".
- * In zero-based mode the "limit" is what the category had to spend this month
- * (carried in plus assigned) and "spent" is its activity. Categories with
- * nothing to spend are left out, the same way limits mode only lists
- * categories that have a limit.
+ * Everything the zero-based Overview shows: the month's numbers plus category
+ * health, where the money sits and ranked suggestions (rules live in
+ * `lib/budgets/zero-based-insights.ts`).
  */
-export const listBudgetsForMode = async (
+export const getZbbOverview = async (
   userId: string,
   month: number,
-): Promise<FrontendBudget[]> => {
-  const settings = await getBudgetSettings(userId);
-  if (settings.mode !== 'ZERO_BASED') {
-    return listBudgets(userId, month);
-  }
+): Promise<FrontendZbbOverview> => {
   const zbb = await getZbbMonth(userId, month);
-  return zbb.categories.flatMap((c) => {
-    const funded = toCents(c.carriedIn) + toCents(c.assigned);
-    if (funded <= 0) return [];
-    return [
-      {
-        id: `zbb-${c.categoryId}-${month}`,
-        categoryId: c.categoryId,
-        categoryName: c.categoryName,
-        month,
-        limitAmount: fromCents(funded),
-        spent: fromCents(Math.max(0, toCents(c.activity))),
+  const { start, end } = monthRange(month);
+  const next = shiftMonth(month, 1);
+
+  const [income, nextAssigned] = await Promise.all([
+    prisma.transaction.aggregate({
+      where: {
+        userId,
+        account: { onBudget: true },
+        type: 'INCOME',
+        isTransfer: false,
+        isPayment: false,
+        date: { gte: start, lt: end },
       },
-    ];
+      _sum: { amount: true },
+    }),
+    prisma.categoryAssignment.aggregate({
+      where: { userId, month: next },
+      _sum: { amount: true },
+    }),
+  ]);
+
+  const categories = zbb.categories.map((c) => ({
+    categoryId: c.categoryId,
+    categoryName: c.categoryName,
+    carriedInCents: toCents(c.carriedIn),
+    assignedCents: toCents(c.assigned),
+    activityCents: toCents(c.activity),
+    availableCents: toCents(c.available),
+    targetCents: c.target === null ? null : toCents(c.target),
+  }));
+  const isCurrentMonth = month === currentMonthNumber();
+  const nextMonthAssignedCents = toCents(nextAssigned._sum.amount ?? 0);
+
+  const insights = buildZbbInsights({
+    month,
+    today: isCurrentMonth
+      ? { day: new Date().getUTCDate(), daysInMonth: daysInMonth(month) }
+      : null,
+    readyToAssignCents: toCents(zbb.readyToAssign),
+    categories,
+    uncategorized: {
+      count: zbb.uncategorizedOnBudget.count,
+      cents: toCents(zbb.uncategorizedOnBudget.total),
+    },
+    nextMonthAssignedCents,
+    nextMonthLabel: LONG_MONTH.format(monthRange(next).start),
+    monthShortLabel: SHORT_MONTH.format(start),
   });
+
+  const sum = (pick: (c: (typeof categories)[number]) => number): string =>
+    fromCents(categories.reduce((total, c) => total + pick(c), 0));
+
+  return {
+    month,
+    startMonth: zbb.startMonth,
+    readyToAssign: zbb.readyToAssign,
+    incomeThisMonth: fromCents(toCents(income._sum.amount ?? 0)),
+    assignedThisMonth: sum((c) => c.assignedCents),
+    spentThisMonth: sum((c) => c.activityCents),
+    availableTotal: sum((c) => c.availableCents),
+    nextMonthAssigned: fromCents(nextMonthAssignedCents),
+    overspent: fromCents(insights.overspentCents),
+    targetShortfall: fromCents(insights.targetShortfallCents),
+    health: insights.health,
+    allocation: insights.allocation,
+    suggestions: insights.suggestions,
+  };
 };

@@ -8,8 +8,6 @@ const { prismaMock, spreadFindMany } = vi.hoisted(() => ({
     account: { findFirst: vi.fn() },
     categoryRule: { findMany: vi.fn() },
     reimbursementLink: { findMany: vi.fn() },
-    // no row = spending-limits mode, which every test here exercises
-    userBudgetSettings: { findUnique: vi.fn().mockResolvedValue(null) },
   },
 }));
 
