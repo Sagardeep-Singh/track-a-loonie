@@ -155,3 +155,54 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
   await page.goto('/budgets');
   await expect(page.getByLabel('Assigned to Fun')).toHaveValue('400.00');
 });
+
+test.describe('on mobile', () => {
+  test.use({ viewport: { width: 402, height: 874 } });
+
+  test('the Left pill opens Move money in a bottom sheet, and targets use one too', async ({
+    page,
+  }) => {
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await signUpThenSignIn(page, {
+      name: 'ZBB mobile',
+      email: `zbb-mobile-${stamp}@example.com`,
+      password: 'zbb-password-123',
+    });
+    await page.request.post('/api/accounts', {
+      data: { name: 'Chequing', type: 'CHECKING', startingBalance: 1000 },
+    });
+    await page.request.post('/api/categories', { data: { name: 'Groceries' } });
+    await page.request.post('/api/categories', { data: { name: 'Fun' } });
+    const mode = await page.request.patch('/api/settings/budget-mode', {
+      data: { mode: 'ZERO_BASED' },
+    });
+    expect(mode.ok()).toBe(true);
+
+    await page.goto('/budgets');
+    await setAssigned(page, 'Groceries', '300');
+
+    // the pill is the only Move control on mobile
+    await expect(row(page, 'Groceries').getByRole('button', { name: /^Move$/ })).toBeHidden();
+    await row(page, 'Groceries')
+      .getByRole('button', { name: 'Move money from Groceries, $300.00 left' })
+      .click();
+    const sheet = page.getByRole('dialog', { name: 'Move money' });
+    await expect(sheet.getByTestId('sheet-handle')).toBeVisible();
+    await sheet.getByLabel('To').selectOption({ label: 'Fun ($0.00)' });
+    await sheet.getByLabel('Amount').fill('120');
+    await sheet.getByRole('button', { name: 'Move money' }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(
+      row(page, 'Fun').getByRole('button', { name: 'Move money from Fun, $120.00 left' }),
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: 'Set target for Fun' }).click();
+    const targetSheet = page.getByRole('dialog', { name: 'Target for Fun' });
+    await expect(targetSheet.getByTestId('sheet-handle')).toBeVisible();
+    await targetSheet.getByLabel('Monthly target').fill('150');
+    await targetSheet.getByRole('button', { name: 'Save target' }).click();
+    await expect(page.getByRole('button', { name: 'Edit target for Fun' })).toContainText(
+      'target $150.00',
+    );
+  });
+});

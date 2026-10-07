@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRightLeft, Check, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
-import { Modal } from '@/components/ui/modal';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
+import { BudgetRing } from '@/components/budgets/budget-ring';
 import { deleteJSON, getJSON, patchJSON, postJSON, putJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { monthLabel } from '@/lib/period-selection';
@@ -18,6 +19,18 @@ const withoutKey = (record: Record<string, string>, key: string): Record<string,
   const next = { ...record };
   delete next[key];
   return next;
+};
+
+/**
+ * How much of what the category had to spend this month (carried in plus
+ * assigned) its activity used, matching what the Overview rings show. Spending
+ * with nothing funded reads as fully over.
+ */
+const spentFraction = (category: FrontendZbbCategory): number => {
+  const funded = Number(category.carriedIn) + Number(category.assigned);
+  const spent = Math.max(Number(category.activity), 0);
+  if (funded <= 0) return spent > 0 ? 2 : 0;
+  return spent / funded;
 };
 
 type MoveDraft = { fromCategoryId: string; toCategoryId: string; amount: string };
@@ -64,6 +77,10 @@ export const ZeroBasedView = ({
   const [targetEdit, setTargetEdit] = useState<TargetDraft | null>(null);
   const [targetPending, setTargetPending] = useState(false);
   const [targetError, setTargetError] = useState<string | null>(null);
+  // stable so the mobile sheet's focus/scroll-lock effect doesn't rerun on
+  // every keystroke
+  const closeTarget = useCallback((): void => setTargetEdit(null), []);
+  const closeMove = useCallback((): void => setMove(null), []);
 
   const { month, startMonth, categories, uncategorizedOnBudget } = data;
   const ready = Number(data.readyToAssign);
@@ -258,6 +275,14 @@ export const ZeroBasedView = ({
             {categories.map((c) => {
               const available = Number(c.available);
               const overspent = available < 0;
+              const pillClass = cn(
+                'rounded-full px-2.5 py-0.5 font-mono text-[13px] font-semibold tabular-nums',
+                overspent
+                  ? 'bg-rose-soft text-rose'
+                  : available > 0
+                    ? 'bg-sky-soft text-sky'
+                    : 'bg-paper-sunk text-ink-muted',
+              );
               return (
                 <li
                   key={c.categoryId}
@@ -267,30 +292,35 @@ export const ZeroBasedView = ({
                     overspent && 'bg-rose-soft/40',
                   )}
                 >
-                  <div className="min-w-0">
-                    <div className="font-display truncate text-[15px] font-semibold">
-                      {c.categoryName}
-                    </div>
-                    <div className="text-ink-muted flex flex-wrap items-center gap-x-1.5 font-mono text-[11.5px] tabular-nums">
-                      {Number(c.carriedIn) !== 0 && <span>{money(c.carriedIn)} carried in ·</span>}
-                      <button
-                        type="button"
-                        onClick={() => openTarget(c)}
-                        className="hover:text-iris inline-flex items-center gap-1"
-                        aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
-                      >
-                        <Target size={12} />
-                        {c.target === null ? 'Set target' : `target ${money(c.target)}`}
-                      </button>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <BudgetRing fraction={spentFraction(c)} size={36} />
+                    <div className="min-w-0">
+                      <div className="font-display truncate text-[15px] font-semibold">
+                        {c.categoryName}
+                      </div>
+                      <div className="text-ink-muted flex flex-wrap items-center gap-x-1.5 font-mono text-[11.5px] tabular-nums">
+                        {Number(c.carriedIn) !== 0 && (
+                          <span>{money(c.carriedIn)} carried in ·</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openTarget(c)}
+                          className="hover:text-iris inline-flex items-center gap-1 whitespace-nowrap"
+                          aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
+                        >
+                          <Target size={12} />
+                          {c.target === null ? 'Set target' : `target ${money(c.target)}`}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 sm:col-start-auto sm:row-start-auto">
+                  <div className="col-start-2 row-start-1 flex w-24 items-center justify-end gap-1 justify-self-end sm:col-start-auto sm:row-start-auto sm:w-auto">
                     <label htmlFor={`assigned-${c.categoryId}`} className="sr-only">
                       Assigned to {c.categoryName}
                     </label>
                     <Input
                       id={`assigned-${c.categoryId}`}
-                      className="w-28 rounded-[9px] text-right font-mono"
+                      className="w-28 rounded-[9px] text-right font-mono max-sm:[appearance:textfield] max-sm:[&::-webkit-inner-spin-button]:appearance-none max-sm:[&::-webkit-outer-spin-button]:appearance-none"
                       type="number"
                       step="0.01"
                       inputMode="decimal"
@@ -308,35 +338,49 @@ export const ZeroBasedView = ({
                       }}
                     />
                   </div>
-                  <div className="text-ink-muted font-mono text-[13px] tabular-nums sm:text-right">
-                    <span className="sm:hidden">Spent </span>
-                    {money(c.activity)}
-                  </div>
-                  <div className="flex items-center justify-end gap-2 sm:contents">
-                    <span
-                      data-testid="zbb-available"
-                      className={cn(
-                        'justify-self-end rounded-full px-2.5 py-0.5 font-mono text-[13px] font-semibold tabular-nums',
-                        overspent
-                          ? 'bg-rose-soft text-rose'
-                          : available > 0
-                            ? 'bg-sky-soft text-sky'
-                            : 'bg-paper-sunk text-ink-muted',
-                      )}
-                    >
-                      {money(c.available)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => openMove(c)}
-                      className={cn(
-                        'inline-flex items-center justify-end gap-1 text-xs',
-                        overspent ? 'text-rose font-semibold' : 'text-ink-muted hover:text-iris',
-                      )}
-                    >
-                      <ArrowRightLeft size={14} />
-                      {overspent ? 'Cover' : 'Move'}
-                    </button>
+                  {/* Mobile: Spent and Left share the row under the name. Desktop
+                      flattens this wrapper so each lands in its own column. */}
+                  <div className="col-span-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 sm:contents">
+                    <div className="text-ink-muted font-mono text-[13px] tabular-nums sm:text-right">
+                      <span className="sm:hidden">Spent </span>
+                      {money(c.activity)}
+                    </div>
+                    <div className="ml-auto flex items-center justify-end gap-2 sm:contents">
+                      {/* no column headers on mobile, and Left matches Assigned
+                          until something is spent or carried in */}
+                      <span className="text-ink-muted font-mono text-[13px] sm:hidden">Left</span>
+                      {/* Mobile: the pill is the Move/Cover button, which keeps the
+                          row short. Desktop keeps a plain pill plus its own column. */}
+                      <button
+                        type="button"
+                        onClick={() => openMove(c)}
+                        aria-label={`${overspent ? 'Cover' : 'Move money from'} ${c.categoryName}, ${money(c.available)} left`}
+                        className={cn(
+                          pillClass,
+                          'relative inline-flex items-center gap-1.5 after:absolute after:-inset-2 sm:hidden',
+                        )}
+                      >
+                        {money(c.available)}
+                        <ArrowRightLeft size={13} aria-hidden="true" />
+                      </button>
+                      <span
+                        data-testid="zbb-available"
+                        className={cn(pillClass, 'hidden justify-self-end sm:inline-block')}
+                      >
+                        {money(c.available)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => openMove(c)}
+                        className={cn(
+                          'hidden items-center justify-end gap-1 text-xs sm:inline-flex',
+                          overspent ? 'text-rose font-semibold' : 'text-ink-muted hover:text-iris',
+                        )}
+                      >
+                        <ArrowRightLeft size={14} />
+                        {overspent ? 'Cover' : 'Move'}
+                      </button>
+                    </div>
                   </div>
                 </li>
               );
@@ -350,9 +394,9 @@ export const ZeroBasedView = ({
         as the category&apos;s spending limit, so it carries into later months until you change it.
       </p>
 
-      <Modal
+      <ResponsiveDialog
         open={targetEdit !== null}
-        onClose={() => setTargetEdit(null)}
+        onClose={closeTarget}
         title={targetEdit ? `Target for ${targetEdit.category.categoryName}` : 'Target'}
       >
         {targetEdit && (
@@ -411,9 +455,9 @@ export const ZeroBasedView = ({
             </div>
           </form>
         )}
-      </Modal>
+      </ResponsiveDialog>
 
-      <Modal open={move !== null} onClose={() => setMove(null)} title="Move money">
+      <ResponsiveDialog open={move !== null} onClose={closeMove} title="Move money">
         {move && (
           <form onSubmit={submitMove} className="flex flex-col gap-3">
             <div>
@@ -476,7 +520,7 @@ export const ZeroBasedView = ({
             </Button>
           </form>
         )}
-      </Modal>
+      </ResponsiveDialog>
     </div>
   );
 };
