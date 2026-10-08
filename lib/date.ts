@@ -39,3 +39,33 @@ export const shiftMonth = (month: number, delta: number): number => {
 /** `YYYYMM` of the UTC month `date` falls in. */
 export const monthOfDate = (date: Date): number =>
   date.getUTCFullYear() * 100 + (date.getUTCMonth() + 1);
+
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/**
+ * The `YYYY-MM-DD` calendar date a stored transaction date falls on. Stored
+ * dates are UTC midnights, so this reads the UTC day. Use this instead of
+ * `toISOString().slice(0, 10)` so every caller shares one definition.
+ */
+export const toDateKey = (date: Date): string => date.toISOString().slice(0, 10);
+
+/**
+ * UTC midnight for a `YYYY-MM-DD` calendar date, or null when the string is
+ * not one or names a day that does not exist (`2026-02-30` would otherwise
+ * roll over to March 2).
+ */
+export const fromDateKey = (key: string): Date | null => {
+  if (!DATE_KEY.test(key)) return null;
+  const date = new Date(`${key}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) || toDateKey(date) !== key ? null : date;
+};
+
+/**
+ * Today's `YYYY-MM-DD` in the *viewer's* timezone. Only for client defaults
+ * like a date input's initial value: a UTC "today" would already be
+ * tomorrow on a Canadian evening.
+ */
+export const todayDateKey = (now: Date = new Date()): string =>
+  `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;

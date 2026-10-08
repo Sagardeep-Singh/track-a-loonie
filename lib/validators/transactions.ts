@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { monthOfDate, monthsBetween } from '@/lib/date';
 import { parseDateParam } from '@/lib/period-selection';
+import { calendarDateSchema } from '@/lib/validators/date';
 import { SPREAD_MAX_MONTHS, SPREAD_MAX_START_OFFSET, SPREAD_MIN_MONTHS } from '@/lib/spread';
 import { TRANSACTIONS_PAGE_SIZE } from '@/lib/transactions/transactions-page-query';
 
@@ -11,7 +12,7 @@ const transactionFieldsSchema = z.object({
   categoryId: z.string().min(1).nullable().optional(),
   amount: z.coerce.number().positive(),
   type: transactionTypeSchema,
-  date: z.coerce.date(),
+  date: calendarDateSchema,
   payee: z.string().trim().max(120).optional(),
   note: z.string().trim().max(280).optional(),
   isPayment: z.coerce.boolean().default(false),
@@ -192,8 +193,8 @@ export const listTransactionsQuerySchema = z.object({
   accountId: z.string().optional(),
   categoryId: z.string().optional(),
   batchId: z.string().optional(),
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
+  from: calendarDateSchema.optional(),
+  to: calendarDateSchema.optional(),
 });
 
 const csvIds = z

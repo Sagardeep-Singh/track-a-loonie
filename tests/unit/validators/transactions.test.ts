@@ -293,3 +293,20 @@ describe('transaction spread rules', () => {
     expect(parse(202807)).toBe(false);
   });
 });
+
+describe('createTransactionSchema date', () => {
+  it('stores a date input value as UTC midnight', () => {
+    const result = createTransactionSchema.parse(base);
+    expect(result.date.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('accepts the ISO timestamp an API response echoes back', () => {
+    const result = updateTransactionSchema.parse({ date: '2026-01-01T00:00:00.000Z' });
+    expect(result.date?.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('rejects formats the server would read in its own timezone', () => {
+    expect(createTransactionSchema.safeParse({ ...base, date: '01/02/2026' }).success).toBe(false);
+    expect(createTransactionSchema.safeParse({ ...base, date: '2026-02-30' }).success).toBe(false);
+  });
+});

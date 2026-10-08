@@ -9,11 +9,10 @@ import { useTransactionForm } from '@/lib/transactions/use-transaction-form';
 import { spreadPreview } from '@/lib/transactions/spread-preview';
 import { SPREAD_MAX_MONTHS, SPREAD_MIN_MONTHS } from '@/lib/spread';
 import { cn } from '@/lib/cn';
+import { todayDateKey } from '@/lib/date';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { FrontendCategory } from '@/lib/services/categories';
 import type { FrontendTransaction } from '@/lib/services/transactions';
-
-const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
 export const TransactionForm = ({
   transaction,
@@ -162,7 +161,7 @@ export const TransactionForm = ({
             id="date"
             name="date"
             type="date"
-            defaultValue={transaction?.date?.slice(0, 10) ?? todayIso()}
+            defaultValue={transaction?.date?.slice(0, 10) ?? todayDateKey()}
             required
           />
         </div>

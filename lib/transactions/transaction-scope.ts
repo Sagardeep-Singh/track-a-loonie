@@ -1,3 +1,4 @@
+import { toDateKey } from '@/lib/date';
 import type { TransactionFilters } from '@/lib/transactions/transaction-filters';
 
 /** DB-free scope, ordering and cursor rules for the paginated Transactions read. */
@@ -64,4 +65,4 @@ export const needsExactStringMatch = (term: string): boolean =>
   term.includes('%') || term.includes('_');
 
 /** UTC calendar day as `YYYY-MM-DD`, independent of host TZ. */
-export const dayKey = (date: Date): string => date.toISOString().slice(0, 10);
+export const dayKey = (date: Date): string => toDateKey(date);

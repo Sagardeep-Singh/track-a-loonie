@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  detectCsvDateFormat,
   guessSplitColumns,
+  parseCsvDate,
   parseCsvAmount,
   resolveImportedTransactionType,
   resolveSplitColumnAmount,
@@ -81,5 +83,106 @@ describe('guessSplitColumns', () => {
 
   it('leaves a column blank when nothing matches', () => {
     expect(guessSplitColumns(['Date', 'Amount'])).toEqual({ credit: '', debit: '' });
+  });
+});
+
+describe('parseCsvDate', () => {
+  it('reads ISO-style dates under YMD, with or without padding or a time', () => {
+    expect(parseCsvDate('2026-10-05', 'YMD')).toBe('2026-10-05');
+    expect(parseCsvDate('2026/10/5', 'YMD')).toBe('2026-10-05');
+    expect(parseCsvDate('2026.10.05', 'YMD')).toBe('2026-10-05');
+    expect(parseCsvDate('  2026-10-05 13:45:00 ', 'YMD')).toBe('2026-10-05');
+    expect(parseCsvDate('2026-10-05T23:30:00Z', 'YMD')).toBe('2026-10-05');
+    expect(parseCsvDate('20261005', 'YMD')).toBe('2026-10-05');
+  });
+
+  it('reads the same numeric date month-first or day-first per format', () => {
+    expect(parseCsvDate('10/05/2026', 'MDY')).toBe('2026-10-05');
+    expect(parseCsvDate('10/05/2026', 'DMY')).toBe('2026-05-10');
+    expect(parseCsvDate('1-5-2026', 'MDY')).toBe('2026-01-05');
+    expect(parseCsvDate('10/05/2026 1:45 PM', 'MDY')).toBe('2026-10-05');
+  });
+
+  it('reads two-digit years as this century', () => {
+    expect(parseCsvDate('10/05/26', 'MDY')).toBe('2026-10-05');
+    expect(parseCsvDate('05/10/26', 'DMY')).toBe('2026-10-05');
+  });
+
+  it('reads month-name dates under any format', () => {
+    for (const format of ['YMD', 'MDY', 'DMY'] as const) {
+      expect(parseCsvDate('Oct 5, 2026', format)).toBe('2026-10-05');
+      expect(parseCsvDate('October 5th 2026', format)).toBe('2026-10-05');
+      expect(parseCsvDate('05-Oct-2026', format)).toBe('2026-10-05');
+      expect(parseCsvDate('5 Sept. 2026', format)).toBe('2026-09-05');
+      expect(parseCsvDate('2026-Oct-05', format)).toBe('2026-10-05');
+    }
+  });
+
+  it('rejects dates that do not exist instead of rolling them over', () => {
+    expect(parseCsvDate('2026-02-30', 'YMD')).toBeNull();
+    expect(parseCsvDate('02/30/2026', 'MDY')).toBeNull();
+    expect(parseCsvDate('13/13/2026', 'DMY')).toBeNull();
+    expect(parseCsvDate('Foo 5, 2026', 'MDY')).toBeNull();
+  });
+
+  it('rejects a numeric date in the wrong order for the format', () => {
+    expect(parseCsvDate('10/05/2026', 'YMD')).toBeNull();
+    expect(parseCsvDate('2026-10-05', 'MDY')).toBeNull();
+    expect(parseCsvDate('20261005', 'DMY')).toBeNull();
+    expect(parseCsvDate('13/05/2026', 'MDY')).toBeNull();
+  });
+
+  it('returns null for blank or non-date cells', () => {
+    expect(parseCsvDate(undefined, 'YMD')).toBeNull();
+    expect(parseCsvDate('', 'YMD')).toBeNull();
+    expect(parseCsvDate('   ', 'MDY')).toBeNull();
+    expect(parseCsvDate('Total', 'MDY')).toBeNull();
+    expect(parseCsvDate('12345', 'YMD')).toBeNull();
+  });
+});
+
+describe('detectCsvDateFormat', () => {
+  it('detects ISO dates', () => {
+    expect(detectCsvDateFormat(['2026-10-05', '2026-10-06'])).toEqual({
+      kind: 'detected',
+      format: 'YMD',
+    });
+  });
+
+  it('detects month-first once a day above 12 shows up', () => {
+    expect(detectCsvDateFormat(['10/05/2026', '10/13/2026'])).toEqual({
+      kind: 'detected',
+      format: 'MDY',
+    });
+  });
+
+  it('detects day-first once a day above 12 shows up', () => {
+    expect(detectCsvDateFormat(['05/10/2026', '13/10/2026'])).toEqual({
+      kind: 'detected',
+      format: 'DMY',
+    });
+  });
+
+  it('is ambiguous when every date reads both ways', () => {
+    expect(detectCsvDateFormat(['10/05/2026', '11/05/2026'])).toEqual({
+      kind: 'ambiguous',
+      options: ['MDY', 'DMY'],
+    });
+  });
+
+  it('treats month-name dates as detected', () => {
+    expect(detectCsvDateFormat(['Oct 5, 2026', 'Oct 6, 2026']).kind).toBe('detected');
+  });
+
+  it('ignores a stray footer line', () => {
+    expect(detectCsvDateFormat(['2026-10-05', '2026-10-06', 'Total', undefined])).toEqual({
+      kind: 'detected',
+      format: 'YMD',
+    });
+  });
+
+  it('reports a column with no dates', () => {
+    expect(detectCsvDateFormat(['Coffee', '', undefined])).toEqual({ kind: 'unrecognized' });
+    expect(detectCsvDateFormat([])).toEqual({ kind: 'unrecognized' });
   });
 });

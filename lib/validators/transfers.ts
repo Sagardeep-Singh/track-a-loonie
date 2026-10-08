@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { calendarDateSchema } from '@/lib/validators/date';
 
 export const matchTransfersRequestSchema = z
   .object({
-    from: z.coerce.date().optional(),
-    to: z.coerce.date().optional(),
+    from: calendarDateSchema.optional(),
+    to: calendarDateSchema.optional(),
   })
   .refine((data) => (data.from == null) === (data.to == null), {
     message: 'from and to must both be set, or both omitted',
