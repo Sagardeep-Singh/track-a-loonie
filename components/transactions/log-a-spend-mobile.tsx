@@ -9,13 +9,12 @@ import { isValidKeypadAmount } from '@/lib/ui/numeric-keypad';
 import { isDesktopViewport } from '@/lib/ui/viewport';
 import { useTransactionForm } from '@/lib/transactions/use-transaction-form';
 import { cn } from '@/lib/cn';
+import { todayDateKey } from '@/lib/date';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { FrontendCategory } from '@/lib/services/categories';
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
 /**
  * The mobile "Log a spend" screen: a full-screen shell with a keypad-driven
@@ -42,7 +41,7 @@ export const LogASpendMobile = ({
   const [amount, setAmount] = useState('');
   const [payee, setPayee] = useState('');
   const [note, setNote] = useState('');
-  const [date, setDate] = useState(todayIso());
+  const [date, setDate] = useState(todayDateKey());
 
   const {
     categoryId,

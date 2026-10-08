@@ -1,3 +1,4 @@
+import { fromDateKey, toDateKey } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { DuplicateFilenameError, ServiceValidationError } from '@/lib/services/common';
 import { compileRuleMatcher } from '@/lib/services/categorize';
@@ -39,14 +40,23 @@ export type RawImportRow = {
   note?: string;
 };
 
+/**
+ * Preview and commit rows and existing DB rows all go through this with a
+ * `Date`, so the day part is always the same UTC `YYYY-MM-DD`. (Preview used
+ * to pass the raw CSV string, so `10/05/2026` never matched `2026-10-05`.)
+ */
 const duplicateKey = (row: {
   accountId: string;
-  date: Date | string;
+  date: Date;
   amount: number;
   payee?: string | null;
-}): string => {
-  const isoDate = typeof row.date === 'string' ? row.date : row.date.toISOString();
-  return `${row.accountId}|${isoDate.slice(0, 10)}|${row.amount.toFixed(2)}|${row.payee ?? ''}`;
+}): string => `${row.accountId}|${toDateKey(row.date)}|${row.amount.toFixed(2)}|${row.payee ?? ''}`;
+
+/** the validator already guarantees a real `YYYY-MM-DD`; this only narrows the type */
+const rowDate = (key: string): Date => {
+  const date = fromDateKey(key);
+  if (!date) throw new ServiceValidationError(`Invalid date: ${key}`);
+  return date;
 };
 
 /** min/max transaction date across a set of rows, used for the batch's date range */
@@ -87,9 +97,8 @@ export const previewImport = async (
   userId: string,
   input: PreviewImportInput,
 ): Promise<PreviewResult> => {
-  const { dateFrom: rowsDateFrom, dateTo: rowsDateTo } = dateRange(
-    input.rows.map((r) => new Date(r.date)),
-  );
+  const dated = input.rows.map((row) => ({ ...row, date: rowDate(row.date) }));
+  const { dateFrom: rowsDateFrom, dateTo: rowsDateTo } = dateRange(dated.map((r) => r.date));
   const [rules, categories, existingKeys, conflict] = await Promise.all([
     prisma.categoryRule.findMany({
       where: { userId },
@@ -109,7 +118,7 @@ export const previewImport = async (
     .sort((a, b) => a.priority - b.priority)
     .map((r) => ({ categoryId: r.categoryId, matcher: compileRuleMatcher(r.matchText) }));
 
-  const rows = input.rows.map((row) => {
+  const rows = dated.map((row) => {
     const text = `${row.payee ?? ''} ${row.note ?? ''}`;
     const categoryId = matchers.find((m) => m.matcher.test(text))?.categoryId ?? null;
     const key = duplicateKey(row);
@@ -120,7 +129,7 @@ export const previewImport = async (
 
     return {
       accountId: row.accountId,
-      date: new Date(row.date),
+      date: row.date,
       amount: row.amount,
       type: row.type,
       payee: row.payee,

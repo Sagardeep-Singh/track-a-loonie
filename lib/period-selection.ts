@@ -1,4 +1,4 @@
-import { daysInMonth } from '@/lib/date';
+import { daysInMonth, fromDateKey, toDateKey } from '@/lib/date';
 import type { Period } from '@/lib/statement';
 
 /**
@@ -16,15 +16,10 @@ export type DateRange = { from: string | null; to: string | null };
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
-const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
-
 /** A `yyyy-mm-dd` string that is a real calendar date, else null — a
  * hand-edited URL must fall back to "no bound", never throw. */
-export const parseDateParam = (value: string | null | undefined): string | null => {
-  if (!value || !DATE_PARAM.test(value)) return null;
-  const date = new Date(`${value}T00:00:00Z`);
-  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? null : value;
-};
+export const parseDateParam = (value: string | null | undefined): string | null =>
+  value && fromDateKey(value) ? value : null;
 
 /** First and last day (inclusive) of a `YYYYMM` month as yyyy-mm-dd. */
 export const monthToRange = (month: number): { from: string; to: string } => {
@@ -38,8 +33,8 @@ export const monthToRange = (month: number): { from: string; to: string } => {
 
 /** A half-open `Period` (end exclusive) as an inclusive yyyy-mm-dd range. */
 export const periodToRange = (period: Period): { from: string; to: string } => ({
-  from: period.start.toISOString().slice(0, 10),
-  to: new Date(period.end.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+  from: toDateKey(period.start),
+  to: toDateKey(new Date(period.end.getTime() - 24 * 60 * 60 * 1000)),
 });
 
 /** Reads a `from`/`to` pair back as a selection: nothing set is all time, an

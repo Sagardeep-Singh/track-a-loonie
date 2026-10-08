@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { commitImportSchema } from '@/lib/validators/csv-import';
+import { commitImportSchema, previewImportSchema } from '@/lib/validators/csv-import';
 
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
@@ -476,5 +476,65 @@ describe('commitImport', () => {
     });
 
     expect(matchTransfersMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('import date handling', () => {
+  const row = {
+    accountId: 'acc-1',
+    date: '2026-03-01',
+    amount: 42,
+    type: 'EXPENSE' as const,
+    payee: 'Coffee Shop',
+  };
+
+  it('returns preview dates as UTC midnight', async () => {
+    const result = await preview({ accountId: 'acc-1', filename: 'march.csv', rows: [row] });
+    expect(result.rows[0].date.toISOString()).toBe('2026-03-01T00:00:00.000Z');
+  });
+
+  it('flags a duplicate of a legacy row stored a few hours off midnight', async () => {
+    prismaMock.transaction.findMany.mockResolvedValue([
+      {
+        accountId: 'acc-1',
+        date: new Date('2026-03-01T05:00:00Z'),
+        amount: 42,
+        payee: 'Coffee Shop',
+      },
+    ]);
+    const result = await preview({ accountId: 'acc-1', filename: 'march.csv', rows: [row] });
+    expect(result.rows[0].duplicate).toBe(true);
+  });
+
+  it('commit dedupes with the same key as preview', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1' });
+    prismaMock.transaction.findMany.mockResolvedValue([
+      { accountId: 'acc-1', date: new Date('2026-03-01'), amount: 42, payee: 'Coffee Shop' },
+    ]);
+    const parsed = commitImportSchema.parse({
+      accountId: 'acc-1',
+      filename: 'march.csv',
+      // the preview row as the client posts it back: an ISO timestamp
+      rows: [{ ...row, date: '2026-03-01T00:00:00.000Z', include: true }],
+    });
+    const result = await commit(parsed);
+    expect(result).toEqual({ batchId: null, imported: 0, skippedDuplicates: 1 });
+  });
+
+  it('rejects a raw date that was not normalized to YYYY-MM-DD', async () => {
+    await expect(
+      preview({
+        accountId: 'acc-1',
+        filename: 'march.csv',
+        rows: [{ ...row, date: '03/01/2026' }],
+      }),
+    ).rejects.toBeInstanceOf(ServiceValidationError);
+    expect(
+      previewImportSchema.safeParse({
+        accountId: 'acc-1',
+        filename: 'march.csv',
+        rows: [{ ...row, date: '03/01/2026' }],
+      }).success,
+    ).toBe(false);
   });
 });

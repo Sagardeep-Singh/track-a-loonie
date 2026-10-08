@@ -38,108 +38,111 @@ so it gets imported unless the commit re-check happens to catch it.
 - Preview and commit build the dedupe key from the same canonical date.
 - The user picks (or confirms) the CSV's date format when it is ambiguous.
 - Rows with an unparseable date are reported, not silently turned into
-  `Invalid Date` or dropped.
+  `Invalid Date`.
 - Small follow-ups for other date drift spots found during the audit.
 
 ## Non-goals
 
-- Fuzzy "same transaction, posted a day later" matching (see open question 3).
+- Fuzzy "same transaction, posted a day later" matching (see open question 1).
 - Storing a per-user timezone.
-- Changing `prisma/schema.prisma` (the column stays `DateTime`).
+- Changing `prisma/schema.prisma` (the column stays `DateTime`; only a data
+  migration is added).
 
 ## Plan
 
 ### Phase 1: fix the import dedupe bug
 
-- [ ] `lib/date.ts`: add calendar-date helpers, all UTC:
+- [x] `lib/date.ts`: add calendar-date helpers, all UTC:
   - `toDateKey(date: Date): string` (`YYYY-MM-DD` from UTC parts). Replaces the
     scattered `toISOString().slice(0, 10)` calls in services.
   - `fromDateKey(key: string): Date` (UTC midnight; throws/returns null on an
     invalid calendar date like `2026-02-30`).
   - `todayDateKey(now?: Date): string` in the _local_ zone, for client defaults.
-- [ ] `lib/import.ts`: add `parseCsvDate(raw, format)` returning
+- [x] `lib/import.ts`: add `parseCsvDate(raw, format)` returning
       `YYYY-MM-DD | null`. Supported formats: `YYYY-MM-DD` (also with time and
       `/`), `MM/DD/YYYY`, `DD/MM/YYYY`, `YYYYMMDD`, `MMM D, YYYY` / `D MMM YYYY`.
       Two-digit years read as 20xx. Trims whitespace and strips a trailing time
       part. Validates the calendar date (no rollover of `02/30`).
-- [ ] `lib/import.ts`: add `detectCsvDateFormat(samples)` that inspects the
+- [x] `lib/import.ts`: add `detectCsvDateFormat(samples)` that inspects the
       date column and returns the format(s) consistent with every sample (for
       example a `13` or higher in the first slot rules out `MM/DD`). Returns
       `'ambiguous'` when both `MM/DD` and `DD/MM` fit every sample.
-- [ ] `components/import/import-view.tsx`: after the date column is chosen,
+- [x] `components/import/import-view.tsx`: after the date column is chosen,
       run detection and show a "Date format" select (prefilled with the
       detected format, required when ambiguous). Normalize each row with
       `parseCsvDate` before posting to preview, so the API only ever gets
-      `YYYY-MM-DD`. Rows that fail to parse are listed in an error with their
-      line numbers instead of being sent.
-- [ ] `lib/validators/csv-import.ts`: `rawImportRowSchema.date` becomes a strict
-      `YYYY-MM-DD` string (regex + real calendar date, reuse `parseDateParam`
-      from `lib/period-selection.ts`). `importRowSchema.date` uses the same
-      check then transforms to UTC midnight, instead of `z.coerce.date()`.
-- [ ] `lib/services/csvImport.ts`:
+      `YYYY-MM-DD`. Rows that fail to parse (e.g. a "Total" footer) are skipped and
+      called out with their line numbers; detection picks the format that
+      reads the most rows, so one stray line doesn't sink it.
+- [x] `lib/validators/csv-import.ts`: `rawImportRowSchema.date` becomes a strict
+      `YYYY-MM-DD` string (`dateKeySchema` in new `lib/validators/date.ts`).
+      `importRowSchema.date` uses `calendarDateSchema`, which also accepts the
+      ISO timestamp the client echoes back from preview and reduces it to its
+      UTC day.
+- [x] `lib/services/csvImport.ts`:
   - `duplicateKey` takes a `Date` only and uses `toDateKey`. Preview converts
     with `fromDateKey` first, so both sides share one code path.
   - Replace `new Date(r.date)` / `new Date(row.date)` with `fromDateKey`.
   - Keep the ±1 day padding on `loadExistingKeys` (covers legacy rows below).
-- [ ] Legacy data: rows imported before this fix may be stored at a non-midnight
-      UTC time. `duplicateKey` already reads the UTC day, which is correct for
-      servers west of UTC. See open question 2 about a one-off normalize script.
+- [x] Legacy data: data migration
+      `prisma/migrations/20261008120000_normalize_transaction_dates` snaps
+      `Transaction.date` and `ImportBatch.dateFrom/dateTo` to the nearest UTC
+      midnight (same pattern as `normalize_user_emails`). No-op on clean rows.
 
 ### Phase 2: tighten the rest of the app's date handling
 
-- [ ] `components/transactions/transaction-form.tsx` and
+- [x] `components/transactions/transaction-form.tsx` and
       `log-a-spend-mobile.tsx`: `todayIso()` uses UTC, so after ~8pm in
       Eastern time the "today" default is tomorrow. Switch to `todayDateKey()`
       (local calendar day).
-- [ ] `lib/validators/transactions.ts`: `date: z.coerce.date()` accepts any
+- [x] `lib/validators/transactions.ts`: `date: z.coerce.date()` accepts any
       string and parses non-ISO input in server-local time. Use the same strict
       `YYYY-MM-DD` to UTC midnight transform as the import validator.
-- [ ] `lib/validators/transfers.ts` (`matchTransfersRequestSchema`) and the
+- [x] `lib/validators/transfers.ts` (`matchTransfersRequestSchema`) and the
       `from`/`to` in `lib/validators/transactions.ts:195`: same strict date
       transform.
-- [ ] `components/transactions/match-transfers-dialog.tsx` presets: compute
+- [x] `components/transactions/match-transfers-dialog.tsx` presets: compute
       from the local calendar day, not `toISOString()`.
-- [ ] Replace remaining `toISOString().slice(0, 10)` for calendar dates
+- [x] Replace remaining `toISOString().slice(0, 10)` for calendar dates
       (`lib/transactions/transaction-scope.ts:dayKey`,
       `lib/services/categorize.ts`) with `toDateKey` so there is one helper.
-- [ ] Leave `lib/transactions/transaction-filters.ts:getCurrentMonthRange` on
+- [x] Leave `lib/transactions/transaction-filters.ts:getCurrentMonthRange` on
       local time (it is the user's "this month"), but document why it differs.
 
 ### Tests
 
-- [ ] `tests/unit/lib/import.test.ts`: `parseCsvDate` for each format, two-digit
+- [x] `tests/unit/lib/import.test.ts`: `parseCsvDate` for each format, two-digit
       years, whitespace, trailing time, invalid dates (`02/30/2026`, `13/13/2026`,
       empty, garbage). `detectCsvDateFormat` for unambiguous US, unambiguous
       DD/MM, ambiguous, mixed/invalid samples.
-- [ ] `tests/unit/lib/date.test.ts`: `toDateKey`, `fromDateKey` (invalid
+- [x] `tests/unit/lib/date.test.ts`: `toDateKey`, `fromDateKey` (invalid
       dates), `todayDateKey` near midnight with a fixed `now`.
-- [ ] `tests/unit/services/csvImport.test.ts`: preview flags a duplicate when
+- [x] `tests/unit/services/csvImport.test.ts`: preview flags a duplicate when
       the existing row is `2026-10-05T00:00:00Z` and the CSV row is the same day
       (regression for this bug); legacy row stored at `2026-10-05T04:00:00Z`
       still matches; in-file duplicate detection still works; commit re-check
       uses the same key.
-- [ ] `tests/unit/validators/csv-import.test.ts` (new): rejects non-ISO and invalid
-      calendar dates; accepts `YYYY-MM-DD` and yields UTC midnight.
-- [ ] Run tests with `TZ=Asia/Kolkata` and `TZ=America/Vancouver` once to prove
+- [x] `tests/unit/validators/date.test.ts` (new) plus cases in
+      `csvImport.test.ts` and `validators/transactions.test.ts`: rejects
+      non-ISO and invalid calendar dates; accepts `YYYY-MM-DD` and yields UTC
+      midnight.
+- [x] Run tests with `TZ=Asia/Kolkata`, `TZ=America/Vancouver` and `TZ=Pacific/Auckland` once to prove
       nothing depends on the server zone.
-- [ ] e2e (`tests/e2e/import-date-formats.spec.ts`, new): import a `DD/MM/YYYY` CSV, re-import
+- [x] e2e (`tests/e2e/import-date-formats.spec.ts`, new): import a `DD/MM/YYYY` CSV, re-import
       it, every row is flagged duplicate; ambiguous file requires a format
-      pick; a bad date shows a row-level error.
-- [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`.
+      pick; a bad date is skipped and called out.
+- [x] `npm run format:fix && npm run lint`, `npm run test`.
+- [ ] `npm run test:e2e` (no database in the dev container; runs in CI).
 
 ## Open questions
 
-1. **Date format choice**: auto-detect with a required select when ambiguous
-   (proposed), or always make the user pick? Should the last used format be
-   remembered per account (no schema change if kept in `localStorage`)?
-2. **Legacy rows**: do we want a one-off script to normalize existing
-   `Transaction.date` and `ImportBatch.dateFrom/dateTo` values to UTC midnight?
-   It is a data change (not schema), but it touches every user, so it needs a
-   yes before writing it.
-3. **Posting-date drift**: some banks re-export a pending transaction with a
-   posting date one or two days later. Is that part of what you are seeing? If
-   so, a follow-up could flag a "possible duplicate" (same account, amount and
-   payee within ±2 days) at preview, unchecked by default but not auto-skipped.
-4. **Payee normalization**: the key also compares payee exactly. Should it be
-   trimmed, case-folded and whitespace-collapsed too? Cheap to add in the same
-   change.
+Decided: auto-detect, with a required pick only when the dates read both
+ways (1), and normalize legacy rows with a data migration (2). Still open:
+
+1. **Posting-date drift**: some banks re-export a pending transaction with a
+   posting date one or two days later. If that shows up, a follow-up could flag
+   a "possible duplicate" (same account, amount and payee within ±2 days) at
+   preview, unchecked by default but not auto-skipped.
+2. **Payee normalization**: the key also compares payee exactly. Trimming,
+   case-folding and collapsing whitespace would be cheap to add.
+3. **Remember the format per account**: not done; detection covers most files.

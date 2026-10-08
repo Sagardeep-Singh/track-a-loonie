@@ -1,12 +1,17 @@
 import { z } from 'zod';
+import { calendarDateSchema, dateKeySchema } from '@/lib/validators/date';
 
 /** stored raw for display, normalized (trim + lowercase) for duplicate matching */
 export const importFilenameSchema = z.string().trim().min(1).max(255);
 
-/** a row straight off the client-side CSV parse, before preview enriches it */
+/**
+ * a row straight off the client-side CSV parse, before preview enriches it.
+ * The client normalizes the bank's date format first (`parseCsvDate`), so
+ * only `YYYY-MM-DD` gets here.
+ */
 export const rawImportRowSchema = z.object({
   accountId: z.string().min(1),
-  date: z.string().min(1),
+  date: dateKeySchema,
   amount: z.coerce.number(),
   type: z.enum(['INCOME', 'EXPENSE']),
   payee: z.string().trim().max(120).optional(),
@@ -21,7 +26,7 @@ export const previewImportSchema = z.object({
 
 export const importRowSchema = z.object({
   accountId: z.string().min(1),
-  date: z.coerce.date(),
+  date: calendarDateSchema,
   amount: z.coerce.number(),
   type: z.enum(['INCOME', 'EXPENSE']),
   payee: z.string().trim().max(120).optional(),

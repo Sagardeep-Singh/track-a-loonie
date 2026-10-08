@@ -32,7 +32,11 @@ export const DEFAULT_TRANSACTION_FILTERS: TransactionFilters = {
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
-/** First and last day (yyyy-mm-dd) of the month containing `now`, in local time. */
+/**
+ * First and last day (yyyy-mm-dd) of the month containing `now`, in local
+ * time on purpose: this is the viewer's "this month", unlike stored
+ * transaction dates, which are UTC calendar days (see lib/date.ts).
+ */
 export const getCurrentMonthRange = (now: Date = new Date()): { from: string; to: string } => {
   const year = now.getFullYear();
   const month = now.getMonth();
