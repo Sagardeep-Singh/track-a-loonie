@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
+import { fromDateKey, toDateKey, todayDateKey } from '@/lib/date';
 
 type Preset = 'WEEK' | 'MONTH' | 'SIX_MONTHS' | 'CUSTOM';
 
@@ -14,18 +15,16 @@ const PRESETS: [Preset, string][] = [
   ['CUSTOM', 'Custom range'],
 ];
 
-/** transaction dates are UTC-midnight calendar dates (see lib/format.ts), so
- * every date computed here stays in UTC rather than the viewer's local
- * timezone, which could otherwise shift the boundary by a day. */
-const presetFrom = (preset: Exclude<Preset, 'CUSTOM'>, today: Date): Date => {
-  const from = new Date(today);
+/** "today" is the viewer's calendar day (a UTC today is already tomorrow on
+ * a Canadian evening); from there the arithmetic runs on UTC-midnight
+ * calendar dates (see lib/format.ts) so nothing shifts by a day. */
+const presetFrom = (preset: Exclude<Preset, 'CUSTOM'>, todayKey: string): string => {
+  const from = fromDateKey(todayKey)!;
   if (preset === 'WEEK') from.setUTCDate(from.getUTCDate() - 7);
   if (preset === 'MONTH') from.setUTCMonth(from.getUTCMonth() - 1);
   if (preset === 'SIX_MONTHS') from.setUTCMonth(from.getUTCMonth() - 6);
-  return from;
+  return toDateKey(from);
 };
-
-const toDateInputValue = (date: Date): string => date.toISOString().slice(0, 10);
 
 export const MatchTransfersDialog = ({
   open,
@@ -42,18 +41,20 @@ export const MatchTransfersDialog = ({
   // every open by the caller remounting this component (`key`), matching
   // this codebase's existing dialog-draft convention.
   const [preset, setPreset] = useState<Preset>('MONTH');
-  const today = new Date();
-  const [customFrom, setCustomFrom] = useState(toDateInputValue(presetFrom('MONTH', today)));
-  const [customTo, setCustomTo] = useState(toDateInputValue(today));
+  const today = todayDateKey();
+  const [customFrom, setCustomFrom] = useState(presetFrom('MONTH', today));
+  const [customTo, setCustomTo] = useState(today);
 
   const customRangeValid = customFrom !== '' && customTo !== '' && customFrom <= customTo;
   const canConfirm = preset !== 'CUSTOM' || customRangeValid;
 
   const handleConfirm = (): void => {
     if (!canConfirm) return;
-    const to = new Date();
-    const from = preset === 'CUSTOM' ? new Date(customFrom) : presetFrom(preset, to);
-    onConfirm({ from, to: preset === 'CUSTOM' ? new Date(customTo) : to });
+    const toKey = preset === 'CUSTOM' ? customTo : todayDateKey();
+    const fromKey = preset === 'CUSTOM' ? customFrom : presetFrom(preset, toKey);
+    const from = fromDateKey(fromKey);
+    const to = fromDateKey(toKey);
+    if (from && to) onConfirm({ from, to });
   };
 
   return (

@@ -1,4 +1,4 @@
-import { monthRange } from '@/lib/date';
+import { monthRange, toDateKey } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { rangeToDates, type DateRange } from '@/lib/period-selection';
 
@@ -87,7 +87,7 @@ export const getCategorizeQueue = async (
     return {
       id: tx.id,
       payee: tx.payee || tx.note || 'Transaction',
-      meta: `${tx.account.name} · ${tx.date.toISOString().slice(0, 10)}`,
+      meta: `${tx.account.name} · ${toDateKey(tx.date)}`,
       amount: Number(tx.amount).toFixed(2),
       suggestedCategoryId: rule?.categoryId ?? null,
       suggestedCategoryName: rule?.category.name ?? null,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Papa from 'papaparse';
 import { Check, Eye, Upload } from 'lucide-react';
@@ -14,10 +14,14 @@ import { formatDate } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { categoryColorVar } from '@/lib/ui/category-color';
 import {
+  CSV_DATE_FORMATS,
+  detectCsvDateFormat,
   guessSplitColumns,
   parseCsvAmount,
+  parseCsvDate,
   resolveImportedTransactionType,
   resolveSplitColumnAmount,
+  type CsvDateFormat,
 } from '@/lib/import';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { FrontendCategory } from '@/lib/services/categories';
@@ -47,6 +51,9 @@ type PreviewRow = {
 
 const NONE = '__none__';
 
+const formatLabel = (format: CsvDateFormat | ''): string =>
+  CSV_DATE_FORMATS.find((f) => f.value === format)?.label ?? 'valid';
+
 /** One signed amount column, or separate credit (money in) / debit (money out) columns. */
 type AmountLayout = 'single' | 'split';
 
@@ -64,6 +71,9 @@ export const ImportView = ({
   const [fileName, setFileName] = useState('');
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
   const [dateCol, setDateCol] = useState('');
+  // '' = use whatever was detected; set only when the user picks one
+  const [dateFormatChoice, setDateFormatChoice] = useState<CsvDateFormat | ''>('');
+  const [skippedDateLines, setSkippedDateLines] = useState<number[]>([]);
   const [amountLayout, setAmountLayout] = useState<AmountLayout>('single');
   const [amountCol, setAmountCol] = useState('');
   const [creditCol, setCreditCol] = useState('');
@@ -90,6 +100,8 @@ export const ImportView = ({
     setError(null);
     setFilenameWarning(null);
     setDuplicateBatch(null);
+    setSkippedDateLines([]);
+    setDateFormatChoice('');
     setFileName(file.name);
 
     Papa.parse<CsvRow>(file, {
@@ -123,16 +135,32 @@ export const ImportView = ({
   const selectedAccount = accounts.find((a) => a.id === accountId);
   const isCreditAccount = isLiabilityAccountType(selectedAccount?.type);
 
+  const dateDetection = useMemo(
+    () => (dateCol ? detectCsvDateFormat(rawRows.map((row) => row[dateCol])) : null),
+    [rawRows, dateCol],
+  );
+  const detectedDateFormat = dateDetection?.kind === 'detected' ? dateDetection.format : null;
+  const dateFormat: CsvDateFormat | '' = dateFormatChoice || detectedDateFormat || '';
+
   const amountMapped =
     amountLayout === 'single' ? !!amountCol : !!creditCol && !!debitCol && creditCol !== debitCol;
 
   const handlePreview = async (): Promise<void> => {
-    if (!dateCol || !amountMapped || !accountId) return;
+    if (!dateCol || !dateFormat || !amountMapped || !accountId) return;
     setError(null);
     setFilenameWarning(null);
     setDuplicateBatch(null);
 
-    const rows = rawRows.flatMap((row) => {
+    // Dates go to the server as YYYY-MM-DD only, so it never has to guess
+    // the bank's format (or parse it in its own timezone).
+    const badDateLines: number[] = [];
+    const rows = rawRows.flatMap((row, index) => {
+      const date = parseCsvDate(row[dateCol], dateFormat);
+      if (!date) {
+        // +2: line 1 is the header, and lines count from 1
+        badDateLines.push(index + 2);
+        return [];
+      }
       let resolved: { amount: number; type: 'INCOME' | 'EXPENSE' } | null;
       if (amountLayout === 'split') {
         // Blank in both columns (a balance or pending line) is dropped.
@@ -148,7 +176,7 @@ export const ImportView = ({
       return [
         {
           accountId,
-          date: row[dateCol],
+          date,
           amount: resolved.amount,
           type: resolved.type,
           payee: payeeCol ? row[payeeCol] : undefined,
@@ -156,8 +184,13 @@ export const ImportView = ({
         },
       ];
     });
+    setSkippedDateLines(badDateLines);
     if (rows.length === 0) {
-      setError('No rows have an amount in the credit or debit column.');
+      setError(
+        badDateLines.length === rawRows.length
+          ? `None of the values in "${dateCol}" read as ${formatLabel(dateFormat)} dates.`
+          : 'No rows have an amount in the credit or debit column.',
+      );
       return;
     }
     setLoading(true);
@@ -237,6 +270,8 @@ export const ImportView = ({
     setFileName('');
     setPreview(null);
     setDateCol('');
+    setDateFormatChoice('');
+    setSkippedDateLines([]);
     setAmountLayout('single');
     setAmountCol('');
     setCreditCol('');
@@ -280,7 +315,14 @@ export const ImportView = ({
             </div>
             <div>
               <Label htmlFor="dateCol">Date column</Label>
-              <Select id="dateCol" value={dateCol} onChange={(e) => setDateCol(e.target.value)}>
+              <Select
+                id="dateCol"
+                value={dateCol}
+                onChange={(e) => {
+                  setDateCol(e.target.value);
+                  setDateFormatChoice('');
+                }}
+              >
                 <option value="">Select…</option>
                 {headers.map((h) => (
                   <option key={h} value={h}>
@@ -289,6 +331,35 @@ export const ImportView = ({
                 ))}
               </Select>
             </div>
+            {dateCol && (
+              <div>
+                <Label htmlFor="dateFormat">Date format</Label>
+                <Select
+                  id="dateFormat"
+                  value={dateFormat}
+                  aria-describedby="dateFormatHint"
+                  onChange={(e) => setDateFormatChoice(e.target.value as CsvDateFormat | '')}
+                >
+                  {!detectedDateFormat && <option value="">Select…</option>}
+                  {CSV_DATE_FORMATS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                      {f.value === detectedDateFormat ? ' (detected)' : ''}
+                    </option>
+                  ))}
+                </Select>
+                {dateDetection?.kind === 'ambiguous' && (
+                  <p id="dateFormatHint" className="text-ink-muted mt-1 text-xs">
+                    These dates read both month-first and day-first. Pick the one your bank uses.
+                  </p>
+                )}
+                {dateDetection?.kind === 'unrecognized' && (
+                  <p id="dateFormatHint" className="text-rose mt-1 text-xs">
+                    No dates recognized in this column.
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <Label htmlFor="amountLayout">Amounts</Label>
               <Select
@@ -378,7 +449,7 @@ export const ImportView = ({
                 onClick={handlePreview}
                 icon={Eye}
                 loading={loading}
-                disabled={!dateCol || !amountMapped}
+                disabled={!dateCol || !dateFormat || !amountMapped}
               >
                 Preview
               </Button>
@@ -412,6 +483,15 @@ export const ImportView = ({
       </Card>
 
       {error && <p className="text-rose text-sm">{error}</p>}
+
+      {preview && skippedDateLines.length > 0 && (
+        <p className="bg-sky-soft text-sky rounded-lg px-4 py-3 text-sm">
+          Skipped {skippedDateLines.length} {skippedDateLines.length === 1 ? 'row' : 'rows'} with a
+          date that isn&rsquo;t {formatLabel(dateFormat)} (line
+          {skippedDateLines.length === 1 ? '' : 's'} {skippedDateLines.slice(0, 10).join(', ')}
+          {skippedDateLines.length > 10 ? '…' : ''}).
+        </p>
+      )}
 
       {filenameWarning && (
         <p className="bg-sky-soft text-sky rounded-lg px-4 py-3 text-sm">

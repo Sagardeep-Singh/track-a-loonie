@@ -74,6 +74,7 @@ Skip steps for trivial changes (typo fixes, small copy edits) — go straight to
 **Always:**
 
 - Focus changes on the task; avoid unrelated refactors.
+- Make only the changes the task needs and keep the diff as small as possible, without compromising code readability.
 - Extend existing services, validators, and shared utilities before adding abstractions.
 - Write a plan to `docs/feature-plans/` (kebab-case) before implementing non-trivial features, with a checklist (`- [ ] step`). Keep it updated through implementation.
 - Add tests for new service methods.

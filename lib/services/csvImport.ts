@@ -1,3 +1,4 @@
+import { fromDateKey, toDateKey } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { DuplicateFilenameError, ServiceValidationError } from '@/lib/services/common';
 import { compileRuleMatcher } from '@/lib/services/categorize';
@@ -39,14 +40,23 @@ export type RawImportRow = {
   note?: string;
 };
 
+/**
+ * Preview and commit rows and existing DB rows all go through this with a
+ * `Date`, so the day part is always the same UTC `YYYY-MM-DD`. (Preview used
+ * to pass the raw CSV string, so `10/05/2026` never matched `2026-10-05`.)
+ */
 const duplicateKey = (row: {
   accountId: string;
-  date: Date | string;
+  date: Date;
   amount: number;
   payee?: string | null;
-}): string => {
-  const isoDate = typeof row.date === 'string' ? row.date : row.date.toISOString();
-  return `${row.accountId}|${isoDate.slice(0, 10)}|${row.amount.toFixed(2)}|${row.payee ?? ''}`;
+}): string => `${row.accountId}|${toDateKey(row.date)}|${row.amount.toFixed(2)}|${row.payee ?? ''}`;
+
+/** the validator already guarantees a real `YYYY-MM-DD`; this only narrows the type */
+const rowDate = (key: string): Date => {
+  const date = fromDateKey(key);
+  if (!date) throw new ServiceValidationError(`Invalid date: ${key}`);
+  return date;
 };
 
 /** min/max transaction date across a set of rows, used for the batch's date range */
@@ -58,10 +68,22 @@ const dateRange = (dates: Date[]): { dateFrom: Date; dateTo: Date } => {
 const DAY_MS = 86_400_000;
 
 /**
+ * Banks can date the same transaction a day apart across exports (pending vs
+ * posted), so a match on an adjacent day counts as a possible duplicate too.
+ */
+const matchesExisting = (
+  existingKeys: Set<string>,
+  row: { accountId: string; date: Date; amount: number; payee?: string | null },
+): boolean =>
+  [-DAY_MS, 0, DAY_MS].some((offset) =>
+    existingKeys.has(duplicateKey({ ...row, date: new Date(row.date.getTime() + offset) })),
+  );
+
+/**
  * A duplicate can only exist on a date present in the submitted rows
  * (`duplicateKey` includes the day), so the existing-rows scan is bound to
  * that range instead of the user's entire history. Padded a day each side
- * for timezone safety around the range's own boundary dates.
+ * so `matchesExisting` can see adjacent-day matches at the range's edges.
  */
 const loadExistingKeys = async (
   userId: string,
@@ -87,9 +109,8 @@ export const previewImport = async (
   userId: string,
   input: PreviewImportInput,
 ): Promise<PreviewResult> => {
-  const { dateFrom: rowsDateFrom, dateTo: rowsDateTo } = dateRange(
-    input.rows.map((r) => new Date(r.date)),
-  );
+  const dated = input.rows.map((row) => ({ ...row, date: rowDate(row.date) }));
+  const { dateFrom: rowsDateFrom, dateTo: rowsDateTo } = dateRange(dated.map((r) => r.date));
   const [rules, categories, existingKeys, conflict] = await Promise.all([
     prisma.categoryRule.findMany({
       where: { userId },
@@ -109,18 +130,18 @@ export const previewImport = async (
     .sort((a, b) => a.priority - b.priority)
     .map((r) => ({ categoryId: r.categoryId, matcher: compileRuleMatcher(r.matchText) }));
 
-  const rows = input.rows.map((row) => {
+  const rows = dated.map((row) => {
     const text = `${row.payee ?? ''} ${row.note ?? ''}`;
     const categoryId = matchers.find((m) => m.matcher.test(text))?.categoryId ?? null;
     const key = duplicateKey(row);
     // flag against existing DB rows, and against an earlier row in this same
     // file (two identical CSV rows shouldn't both import silently)
-    const duplicate = existingKeys.has(key) || seenInBatch.has(key);
+    const duplicate = matchesExisting(existingKeys, row) || seenInBatch.has(key);
     seenInBatch.add(key);
 
     return {
       accountId: row.accountId,
-      date: new Date(row.date),
+      date: row.date,
       amount: row.amount,
       type: row.type,
       payee: row.payee,
@@ -195,7 +216,7 @@ export const commitImport = async (
     }
     // not flagged at preview but matching now: stale preview / double submit.
     // Unchanged protection.
-    if (existingKeys.has(key) || seenInBatch.has(key)) return false;
+    if (matchesExisting(existingKeys, row) || seenInBatch.has(key)) return false;
     seenInBatch.add(key);
     return true;
   });
