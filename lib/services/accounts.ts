@@ -1,3 +1,4 @@
+import { defaultOnBudgetFor } from '@/lib/account-types';
 import { prisma } from '@/lib/db/prisma';
 import { toSerializable } from '@/lib/utils';
 import { ServiceValidationError } from '@/lib/services/common';
@@ -76,8 +77,8 @@ export const createAccount = async (
       type: input.type,
       startingBalance: input.startingBalance,
       statementDay: input.type === 'CREDIT_CARD' ? (input.statementDay ?? null) : null,
-      // savings is long-term money: off-budget unless the user says otherwise
-      onBudget: input.onBudget ?? input.type !== 'SAVINGS',
+      // savings and investments are long-term money: off-budget unless the user says otherwise
+      onBudget: input.onBudget ?? defaultOnBudgetFor(input.type),
     },
     include: {
       transactions: { select: { amount: true, type: true } },

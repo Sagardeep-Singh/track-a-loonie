@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ACCOUNT_TYPE_VALUES } from '@/lib/account-types';
 import { SPREAD_MAX_MONTHS, SPREAD_MIN_MONTHS } from '@/lib/spread';
 
 export const USER_DATA_FORMAT_VERSION = 2;
@@ -25,7 +26,7 @@ const signedDecimal = z
 const accountSchema = z.strictObject({
   id: z.string().min(1),
   name: z.string().min(1),
-  type: z.enum(['CHECKING', 'SAVINGS', 'CREDIT_CARD', 'CASH']),
+  type: z.enum(ACCOUNT_TYPE_VALUES),
   startingBalance: signedDecimal,
   statementDay: z.number().int().min(1).max(28).nullable(),
   /** v2+; absent in v1 files, where import derives it from `type` */

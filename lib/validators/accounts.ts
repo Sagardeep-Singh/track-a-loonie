@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { ACCOUNT_TYPE_VALUES } from '@/lib/account-types';
 
-export const accountTypeSchema = z.enum(['CHECKING', 'SAVINGS', 'CREDIT_CARD', 'CASH']);
+export const accountTypeSchema = z.enum(ACCOUNT_TYPE_VALUES);
 
 export const createAccountSchema = z
   .object({

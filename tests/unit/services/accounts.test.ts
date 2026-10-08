@@ -109,6 +109,58 @@ describe('createAccount', () => {
     );
     expect(flags).toEqual([false, true, true]);
   });
+
+  it('puts registered and investment accounts off-budget and a line of credit on-budget', async () => {
+    prismaMock.account.create.mockResolvedValue({
+      id: 'acc-4',
+      name: 'x',
+      type: 'TFSA',
+      startingBalance: 0,
+      onBudget: false,
+      createdAt: new Date('2026-01-01'),
+      transactions: [],
+      importBatches: [],
+    });
+
+    await createAccount('user-1', { name: 'RRSP', type: 'RRSP', startingBalance: 0 });
+    await createAccount('user-1', { name: 'TFSA', type: 'TFSA', startingBalance: 0 });
+    await createAccount('user-1', { name: 'Brokerage', type: 'INVESTMENT', startingBalance: 0 });
+    await createAccount('user-1', { name: 'HELOC', type: 'LINE_OF_CREDIT', startingBalance: 0 });
+    await createAccount('user-1', {
+      name: 'Spending TFSA',
+      type: 'TFSA',
+      startingBalance: 0,
+      onBudget: true,
+    });
+
+    const flags = prismaMock.account.create.mock.calls.map(
+      (call: unknown[]) => (call[0] as { data: { onBudget: boolean } }).data.onBudget,
+    );
+    expect(flags).toEqual([false, false, false, true, true]);
+  });
+
+  it('drops statementDay for a line of credit', async () => {
+    prismaMock.account.create.mockResolvedValue({
+      id: 'acc-5',
+      name: 'LOC',
+      type: 'LINE_OF_CREDIT',
+      startingBalance: 0,
+      createdAt: new Date('2026-01-01'),
+      transactions: [],
+      importBatches: [],
+    });
+
+    await createAccount('user-1', {
+      name: 'LOC',
+      type: 'LINE_OF_CREDIT',
+      startingBalance: 0,
+      statementDay: 15,
+    });
+
+    expect(prismaMock.account.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ statementDay: null }) }),
+    );
+  });
 });
 
 describe('updateAccount / deleteAccount', () => {
@@ -159,6 +211,15 @@ describe('deleteAccount reimbursement guard', () => {
 describe('updateAccount statementDay', () => {
   it('rejects statementDay when the resulting type is not CREDIT_CARD', async () => {
     prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'SAVINGS' });
+
+    await expect(updateAccount('user-1', 'acc-1', { statementDay: 15 })).rejects.toThrow(
+      ServiceValidationError,
+    );
+    expect(prismaMock.account.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects statementDay on a line of credit', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'LINE_OF_CREDIT' });
 
     await expect(updateAccount('user-1', 'acc-1', { statementDay: 15 })).rejects.toThrow(
       ServiceValidationError,

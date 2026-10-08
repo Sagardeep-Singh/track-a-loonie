@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
+import { defaultOnBudgetFor } from '@/lib/account-types';
 import { prisma } from '@/lib/db/prisma';
 import { spreadEndMonth } from '@/lib/spread';
 import { USER_DATA_FORMAT_VERSION, type UserDataFile } from '@/lib/validators/user-data';
@@ -297,7 +298,7 @@ export const importUserData = async (
             type: a.type,
             startingBalance: a.startingBalance,
             statementDay: a.statementDay,
-            onBudget: a.onBudget ?? a.type !== 'SAVINGS',
+            onBudget: a.onBudget ?? defaultOnBudgetFor(a.type),
             createdAt: a.createdAt,
           })),
         });

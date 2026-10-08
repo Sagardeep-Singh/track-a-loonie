@@ -1,3 +1,4 @@
+import { isLiabilityAccountType } from '@/lib/account-types';
 import { fromDateKey } from '@/lib/date';
 
 /**
@@ -10,7 +11,7 @@ export const resolveImportedTransactionType = (
   amount: number,
   accountType: string,
 ): 'INCOME' | 'EXPENSE' => {
-  const isExpense = accountType === 'CREDIT_CARD' ? amount > 0 : amount < 0;
+  const isExpense = isLiabilityAccountType(accountType) ? amount > 0 : amount < 0;
   return isExpense ? 'EXPENSE' : 'INCOME';
 };
 

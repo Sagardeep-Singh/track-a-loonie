@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label, Select } from '@/components/ui/field';
 import { Money } from '@/components/ui/money';
+import { isLiabilityAccountType } from '@/lib/account-types';
 import { postJSON } from '@/lib/api-client';
 import { formatDate } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -132,7 +133,7 @@ export const ImportView = ({
   // exports are inverted: a positive amount is a charge (expense), a
   // negative one is a payment or refund credited back (income).
   const selectedAccount = accounts.find((a) => a.id === accountId);
-  const isCreditAccount = selectedAccount?.type === 'CREDIT_CARD';
+  const isCreditAccount = isLiabilityAccountType(selectedAccount?.type);
 
   const dateDetection = useMemo(
     () => (dateCol ? detectCsvDateFormat(rawRows.map((row) => row[dateCol])) : null),

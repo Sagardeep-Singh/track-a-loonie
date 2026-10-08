@@ -7,6 +7,7 @@ import {
   yyyymmToMonthInput,
   type TransactionFormValues,
 } from '@/lib/transactions/transaction-payload';
+import { isLiabilityAccountType } from '@/lib/account-types';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { FrontendTransaction } from '@/lib/services/transactions';
 
@@ -88,7 +89,7 @@ export const useTransactionForm = ({
   );
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
-  const canBePayment = type === 'INCOME' && selectedAccount?.type === 'CREDIT_CARD';
+  const canBePayment = type === 'INCOME' && isLiabilityAccountType(selectedAccount?.type);
   const canBeReimbursable = type === 'EXPENSE' && !isTransfer && !isPayment;
   // reimbursable and spread are mutually exclusive; each surface disables one
   // while the other is on
