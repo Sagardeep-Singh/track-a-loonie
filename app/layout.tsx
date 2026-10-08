@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Space_Grotesk, Inter, IBM_Plex_Mono } from 'next/font/google';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { ThemeInit } from '@/components/settings/theme-init';
 import { ServiceWorkerRegister } from '@/components/pwa/service-worker-register';
 import { MotionProvider } from '@/components/motion/motion-provider';
@@ -54,6 +55,7 @@ const RootLayout = ({ children }: { children: React.ReactNode }): React.ReactEle
       <ThemeInit />
       <ServiceWorkerRegister />
       <MotionProvider>{children}</MotionProvider>
+      <SpeedInsights />
     </body>
   </html>
 );
