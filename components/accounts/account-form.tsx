@@ -5,15 +5,14 @@ import { useRouter } from 'next/navigation';
 import { Check, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
+import {
+  ACCOUNT_TYPE_GROUPS,
+  ACCOUNT_TYPES,
+  accountTypesInGroup,
+  defaultOnBudgetFor,
+} from '@/lib/account-types';
 import { patchJSON, postJSON } from '@/lib/api-client';
 import type { FrontendAccount } from '@/lib/services/accounts';
-
-const ACCOUNT_TYPES = [
-  { value: 'CHECKING', label: 'Checking' },
-  { value: 'SAVINGS', label: 'Savings' },
-  { value: 'CREDIT_CARD', label: 'Credit card' },
-  { value: 'CASH', label: 'Cash' },
-] as const;
 
 export const AccountForm = ({
   account,
@@ -29,10 +28,10 @@ export const AccountForm = ({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [type, setType] = useState(account?.type ?? 'CHECKING');
-  // a new account follows its type's default (savings off-budget) until the
-  // user ticks the box themselves
+  // a new account follows its type's default (savings and investments
+  // off-budget) until the user ticks the box themselves
   const [onBudgetChoice, setOnBudgetChoice] = useState<boolean | null>(account?.onBudget ?? null);
-  const onBudget = onBudgetChoice ?? type !== 'SAVINGS';
+  const onBudget = onBudgetChoice ?? defaultOnBudgetFor(type);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -71,10 +70,14 @@ export const AccountForm = ({
       <div>
         <Label htmlFor="type">Type</Label>
         <Select id="type" name="type" value={type} onChange={(e) => setType(e.target.value)}>
-          {ACCOUNT_TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
+          {ACCOUNT_TYPE_GROUPS.map((group) => (
+            <optgroup key={group} label={group}>
+              {accountTypesInGroup(group).map((value) => (
+                <option key={value} value={value}>
+                  {ACCOUNT_TYPES[value].label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </Select>
       </div>

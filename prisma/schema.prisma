@@ -12,6 +12,14 @@ enum AccountType {
   SAVINGS
   CREDIT_CARD
   CASH
+  LINE_OF_CREDIT
+  RRSP
+  TFSA
+  FHSA
+  RESP
+  RRIF
+  LIRA
+  INVESTMENT
 }
 
 enum TransactionType {

@@ -24,6 +24,17 @@ describe('resolveImportedTransactionType', () => {
   it('treats a negative amount as income for a credit card account (a payment or refund)', () => {
     expect(resolveImportedTransactionType(-42.5, 'CREDIT_CARD')).toBe('INCOME');
   });
+
+  it('uses the credit card convention for a line of credit', () => {
+    expect(resolveImportedTransactionType(42.5, 'LINE_OF_CREDIT')).toBe('EXPENSE');
+    expect(resolveImportedTransactionType(-42.5, 'LINE_OF_CREDIT')).toBe('INCOME');
+  });
+
+  it('uses the debit convention for registered and investment accounts', () => {
+    expect(resolveImportedTransactionType(-100, 'TFSA')).toBe('EXPENSE');
+    expect(resolveImportedTransactionType(100, 'RRSP')).toBe('INCOME');
+    expect(resolveImportedTransactionType(-100, 'INVESTMENT')).toBe('EXPENSE');
+  });
 });
 
 describe('parseCsvAmount', () => {

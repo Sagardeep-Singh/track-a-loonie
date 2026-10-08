@@ -35,20 +35,27 @@ Types and labels only. Balances keep coming from `startingBalance` + transaction
 
 ## Implementation checklist
 
-- [ ] `prisma/schema.prisma`: add enum values; `npm run prisma:migrate -- --name add_registered_account_types`; `npm run prisma:generate`
-- [ ] `lib/account-types.ts`: `ACCOUNT_TYPES` metadata map, `ACCOUNT_TYPE_VALUES` tuple, `ACCOUNT_TYPE_GROUPS` order, helpers `isLiabilityAccountType(type)`, `defaultOnBudgetFor(type)`, `accountTypeLabel(type)`
-- [ ] `lib/validators/accounts.ts` + `lib/validators/user-data.ts`: build `z.enum` from `ACCOUNT_TYPE_VALUES`
-- [ ] `lib/services/accounts.ts` + `lib/services/userData.ts`: replace `type !== 'SAVINGS'` with `defaultOnBudgetFor(type)`
-- [ ] `lib/import.ts`: `resolveImportedTransactionType` uses `isLiabilityAccountType`
-- [ ] `components/import/import-view.tsx`, `components/transactions/transactions-view.tsx` (payment-related only, not statement toggle), `lib/transactions/use-transaction-form.ts`: `CREDIT_CARD` checks that are about liability behaviour switch to `isLiabilityAccountType`
-- [ ] `components/accounts/account-form.tsx`: grouped `<optgroup>` select driven by metadata; on-budget default from `defaultOnBudgetFor`
-- [ ] `components/accounts/accounts-view.tsx`: drop local `TYPE_LABELS`, use `accountTypeLabel`; group cards by `group`; "owing" via `isLiabilityAccountType`
-- [ ] Unit tests (`tests/unit/lib/account-types.test.ts`): every enum value has metadata; liability and on-budget defaults per type
-- [ ] Unit tests (`tests/unit/services/accounts.test.ts`): create RRSP defaults to off-budget; create LOC defaults to on-budget; explicit `onBudget` overrides; `statementDay` rejected on LOC
-- [ ] Unit tests (`tests/unit/lib/import.test.ts`): LOC uses inverted sign convention; TFSA uses debit convention
-- [ ] E2E (`tests/e2e/account-types.spec.ts`): create a TFSA and a LOC, see them under Registered / Credit headings with correct labels and "owing" on the LOC
-- [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
-- [ ] Update `docs/feature-plans/budget-tracker-mvp.md` data model sketch with the new enum values
+- [x] `prisma/schema.prisma`: add enum values; `npm run prisma:migrate -- --name add_registered_account_types`; `npm run prisma:generate`
+- [x] `lib/account-types.ts`: `ACCOUNT_TYPES` metadata map, `ACCOUNT_TYPE_VALUES` tuple, `ACCOUNT_TYPE_GROUPS` order, helpers `isLiabilityAccountType(type)`, `defaultOnBudgetFor(type)`, `accountTypeLabel(type)`
+- [x] `lib/validators/accounts.ts` + `lib/validators/user-data.ts`: build `z.enum` from `ACCOUNT_TYPE_VALUES`
+- [x] `lib/services/accounts.ts` + `lib/services/userData.ts`: replace `type !== 'SAVINGS'` with `defaultOnBudgetFor(type)`
+- [x] `lib/import.ts`: `resolveImportedTransactionType` uses `isLiabilityAccountType`
+- [x] `components/import/import-view.tsx`, `components/transactions/transactions-view.tsx` (payment-related only, not statement toggle), `lib/transactions/use-transaction-form.ts`: `CREDIT_CARD` checks that are about liability behaviour switch to `isLiabilityAccountType`
+- [x] `components/accounts/account-form.tsx`: grouped `<optgroup>` select driven by metadata; on-budget default from `defaultOnBudgetFor`
+- [x] `components/accounts/accounts-view.tsx`: drop local `TYPE_LABELS`, use `accountTypeLabel`; group cards by `group`; "owing" via `isLiabilityAccountType`
+- [x] Unit tests (`tests/unit/lib/account-types.test.ts`): every enum value has metadata; liability and on-budget defaults per type
+- [x] Unit tests (`tests/unit/services/accounts.test.ts`): create RRSP defaults to off-budget; create LOC defaults to on-budget; explicit `onBudget` overrides; `statementDay` rejected on LOC
+- [x] Unit tests (`tests/unit/lib/import.test.ts`): LOC uses inverted sign convention; TFSA uses debit convention
+- [x] E2E (`tests/e2e/account-types.spec.ts`): create a TFSA and a LOC, see them under Registered / Credit headings with correct labels and "owing" on the LOC
+- [x] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
+- [x] Update `docs/feature-plans/budget-tracker-mvp.md` data model sketch with the new enum values
+
+## Implementation notes
+
+- Open questions below went with the proposed defaults: no `statementDay` on LOC, groups named Banking / Credit / Registered / Investment, single net worth number.
+- `accountTypeGroup(type)` was added alongside the planned helpers for the accounts page grouping.
+- The "Add an account" tile now sits in its own row below the grouped cards.
+- Migration was hand-written (`ALTER TYPE ... ADD VALUE`) and verified with `prisma migrate deploy` plus `prisma migrate diff` (no drift) on a local Postgres 16.
 
 ## Open questions
 
