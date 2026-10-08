@@ -68,10 +68,22 @@ const dateRange = (dates: Date[]): { dateFrom: Date; dateTo: Date } => {
 const DAY_MS = 86_400_000;
 
 /**
+ * Banks can date the same transaction a day apart across exports (pending vs
+ * posted), so a match on an adjacent day counts as a possible duplicate too.
+ */
+const matchesExisting = (
+  existingKeys: Set<string>,
+  row: { accountId: string; date: Date; amount: number; payee?: string | null },
+): boolean =>
+  [-DAY_MS, 0, DAY_MS].some((offset) =>
+    existingKeys.has(duplicateKey({ ...row, date: new Date(row.date.getTime() + offset) })),
+  );
+
+/**
  * A duplicate can only exist on a date present in the submitted rows
  * (`duplicateKey` includes the day), so the existing-rows scan is bound to
  * that range instead of the user's entire history. Padded a day each side
- * for timezone safety around the range's own boundary dates.
+ * so `matchesExisting` can see adjacent-day matches at the range's edges.
  */
 const loadExistingKeys = async (
   userId: string,
@@ -124,7 +136,7 @@ export const previewImport = async (
     const key = duplicateKey(row);
     // flag against existing DB rows, and against an earlier row in this same
     // file (two identical CSV rows shouldn't both import silently)
-    const duplicate = existingKeys.has(key) || seenInBatch.has(key);
+    const duplicate = matchesExisting(existingKeys, row) || seenInBatch.has(key);
     seenInBatch.add(key);
 
     return {
@@ -204,7 +216,7 @@ export const commitImport = async (
     }
     // not flagged at preview but matching now: stale preview / double submit.
     // Unchanged protection.
-    if (existingKeys.has(key) || seenInBatch.has(key)) return false;
+    if (matchesExisting(existingKeys, row) || seenInBatch.has(key)) return false;
     seenInBatch.add(key);
     return true;
   });

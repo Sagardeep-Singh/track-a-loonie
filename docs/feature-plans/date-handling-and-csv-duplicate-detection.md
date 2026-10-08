@@ -43,7 +43,7 @@ so it gets imported unless the commit re-check happens to catch it.
 
 ## Non-goals
 
-- Fuzzy "same transaction, posted a day later" matching (see open question 1).
+- Fuzzy "same transaction, posted a day later" matching beyond ±1 day.
 - Storing a per-user timezone.
 - Changing `prisma/schema.prisma` (the column stays `DateTime`; only a data
   migration is added).
@@ -139,10 +139,10 @@ so it gets imported unless the commit re-check happens to catch it.
 Decided: auto-detect, with a required pick only when the dates read both
 ways (1), and normalize legacy rows with a data migration (2). Still open:
 
-1. **Posting-date drift**: some banks re-export a pending transaction with a
-   posting date one or two days later. If that shows up, a follow-up could flag
-   a "possible duplicate" (same account, amount and payee within ±2 days) at
-   preview, unchecked by default but not auto-skipped.
+1. ~~**Posting-date drift**~~: done. A row matching an existing transaction
+   (same account, amount and payee) dated a day earlier or later is flagged as a
+   possible duplicate, at preview and in the commit re-check. Rows within the
+   same file still need an exact date match.
 2. **Payee normalization**: the key also compares payee exactly. Trimming,
    case-folding and collapsing whitespace would be cheap to add.
 3. **Remember the format per account**: not done; detection covers most files.
