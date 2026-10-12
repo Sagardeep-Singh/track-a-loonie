@@ -26,18 +26,29 @@ Non-goals for v1:
 - Several goals sharing one category, or one goal pulling from several categories.
 - Push reminders for goals.
 
-## Proposed decisions
+## Decisions
 
-These are recommendations. Items marked **(confirm)** need a call from the owner before the
-architect step.
+Locked with the owner:
+
+- **The monthly target is recalculated every month from previous months' contributions.** The
+  amount needed in month `m` is whatever is still missing at the start of `m`, split evenly
+  over the months left (including `m`). Falling behind raises later months, getting ahead
+  lowers them. Nothing about the schedule is stored.
+- **A category can't have both a goal and a spending limit.** Creating a goal on a category
+  that has a `Budget` row throws a `ServiceValidationError` that says to remove the limit
+  first; creating a limit on a goal's category throws the mirror error.
+- **Goal contributions stay out of spending charts but still count as money used in the
+  month.** The expense pie, Trends category lines and Trends expense bars leave goal
+  categories out. The month's headline numbers show contributions as their own "Saved" figure
+  and subtract it from what's left, so income minus expenses minus saved is the real leftover.
+  See "Overview and Trends".
+
+Recommendations still open. Items marked **(confirm)** need a call from the owner before the
+architect step:
 
 - **One goal per category, category required.** The goal reuses the category as its envelope
   in ZBB and as the tag for contributions in limits mode. The create form can create a new
   category inline ("Trip to Japan") or pick an existing one. `categoryId` is unique on the goal.
-- **The monthly amount is recalculated every month, not fixed at creation.** The amount needed
-  in month `m` is whatever is still missing at the start of `m`, split evenly over the months
-  left (including `m`). Falling behind raises later months, getting ahead lowers them. This is
-  the behavior people expect from YNAB-style "needed for spending by date" goals. **(confirm)**
 - **Rounding reuses `allocateSpread` from `lib/spread.ts`.** This month's need is the first
   share of `allocateSpread(remainingCents, m, monthsLeft)`, so the extra cents go to the
   earliest months and the schedule always sums exactly to the remaining amount.
@@ -48,11 +59,6 @@ architect step.
 - **Reaching the target** marks the goal "funded" in the UI (derived, not stored). The user
   archives it manually once they've used the money. `archivedAt` hides it from both budget
   views.
-- **A category can't have both a goal and a spending limit.** Mixing a cap and a floor on one
-  category makes both numbers meaningless, and in ZBB both would compete to be the category's
-  target. Creating a goal on a category that has a `Budget` row throws a
-  `ServiceValidationError` that says to remove the limit first; creating a limit on a goal's
-  category throws the mirror error. **(confirm, the alternative is "goal wins, limit ignored")**
 
 ## How progress and the monthly need work in each mode
 
@@ -76,28 +82,69 @@ as the user contributes. What they put aside this month is shown next to it as
 
 ### Limits mode (default)
 
-Limits mode has no envelopes, so the only signal is real money moving. Progress is the net of
-transactions in the goal's category since the goal started:
+Limits mode has no envelopes, so the only signal is real money leaving the accounts you spend
+from. A contribution is any transaction in the goal's category on a **spending account**,
+which reuses the existing `Account.onBudget` flag (chequing, cash and cards default on,
+SAVINGS and the registered types default off):
 
 ```
-contributed(m)    = sum of EXPENSE in c dated in m  -  sum of INCOME in c dated in m
+contributed(m)    = EXPENSE in c on spending accounts dated in m
+                  - INCOME in c on spending accounts dated in m
 progressBefore(m) = S0 + sum of contributed(k) for G <= k < m
 ```
 
-- The expected flow is "transfer $250 from chequing to savings, categorize it as Trip to
-  Japan". The transfer flag is ignored on purpose: a matched transfer pair, a savings account
-  that isn't imported (so the chequing leg is a plain EXPENSE), or a cash envelope all count.
-- Pulling money back out is an INCOME in the goal category and lowers progress.
-- **(confirm)** Spending the money (paying for the flights) should be categorized elsewhere,
-  otherwise it would count as a contribution. Alternative: link the goal to an account and use
-  the balance change since `G`. That is simpler for a dedicated account but breaks when one
-  account holds several goals, so it's not the recommendation.
-- Goal categories are excluded from limits-mode spend aggregates that would treat
-  contributions as overspending. Today `listBudgets` only shows categories with a `Budget`
-  row, and the "no limit and goal" rule above keeps goal categories out of it, so no change
-  is needed there. The Overview expense pie and Trends do count non-transfer EXPENSE rows in
-  the category as spending. **(confirm)** whether goal categories should be excluded from
-  spending charts (recommended, otherwise saving looks like spending).
+Only the spending-account side counts because a matched transfer has two legs. If the user
+categorizes both legs as the goal (chequing EXPENSE and savings INCOME), counting both would
+cancel out to zero. Counting only the chequing side gives the right answer whether the savings
+account is imported or not. The transfer flag itself is ignored, so an unmatched leg counts
+the same as a matched one.
+
+`onBudget` is documented today as "ZBB only, ignored everywhere else". This feature makes it
+apply in limits mode too, so the account form shows the toggle in both modes, labelled as
+"Spending account" with a short hint. **(confirm the label)**
+
+#### Worked example
+
+Goal: **Trip to Japan**, $3,000 by August 2027, created October 2026, no starting amount. That
+is 11 months (Oct to Aug). The user has a chequing account (spending) and a savings account
+(not spending).
+
+| Month    | Saved before | Months left | Need this month | What the user does                                                       | Counted   |
+| -------- | ------------ | ----------- | --------------- | ------------------------------------------------------------------------ | --------- |
+| Oct 2026 | $0.00        | 11          | $272.73         | Transfers $272.73 chequing → savings, categorized Trip to Japan           | +$272.73  |
+| Nov 2026 | $272.73      | 10          | $272.73         | Forgets                                                                  | $0        |
+| Dec 2026 | $272.73      | 9           | $303.03         | Behind (plan to date is $545.46). Transfers $500                         | +$500.00  |
+| Jan 2027 | $772.73      | 8           | $278.41         | Still behind (plan to date is $818.19). Transfers $278.41                | +$278.41  |
+| Mar 2027 | ...          | ...         | ...             | Car repair: moves $200 savings → chequing, categorized Trip to Japan      | −$200.00  |
+| Aug 2027 | reaches $3,000 | 1         | remainder       | Books $1,400 flights on the credit card, categorized **Travel**           | $0        |
+
+How each row is read:
+
+- **Oct:** the chequing EXPENSE leg is on a spending account, so it counts. The savings INCOME
+  leg is ignored even if it's categorized too. If the savings account isn't imported at all,
+  the chequing leg alone still counts.
+- **Nov to Dec:** nothing was put aside in November, so December spreads the $2,727.27 still
+  missing over the 9 months left ($303.03) and the goal shows as behind. The extra $500 in
+  December lowers January to $278.41, but January is still behind: $772.73 saved against
+  $818.19 planned for Oct to Dec. It goes back to on track once the total catches up.
+- **Mar:** pulling money back is the chequing INCOME leg on a spending account, so it lowers
+  progress. The following months go up to make up for it.
+- **Aug, the trap:** the purchase must not use the goal's category. A $1,400 card charge
+  categorized Trip to Japan is an EXPENSE on a spending account, so limits mode would read it
+  as another contribution and show $4,400 saved. Mitigations in the UI: the transaction
+  category picker shows goal categories in their own "Savings goals" group, and once a goal is
+  funded the card suggests archiving it. Paying the flights straight from the savings account
+  has no effect on the goal either way, since that account isn't a spending account.
+
+The same purchase in ZBB is fine: activity in the goal's category lowers its available, which
+is the right outcome there.
+
+Alternative considered: link each goal to an account and use the balance change since `G`.
+No categorizing needed and spending from savings lowers progress automatically, but it breaks
+as soon as one savings account holds more than one goal, so it's not the recommendation.
+
+- `listBudgets` only shows categories with a `Budget` row, and the "no goal and limit" rule
+  keeps goal categories out of it, so limit cards need no change.
 - UI: a "Savings goals" section under the limit cards on the Budgets page. Each goal shows a
   progress bar to `T`, "Save $Z this month", "Put aside $Y so far this month", months left and
   an on track / behind / funded / overdue badge.
@@ -143,6 +190,28 @@ Goals live in their own table and don't depend on the mode, so switching is non-
 the rest of budgeting. Progress is recomputed with the active mode's formula. The numbers can
 differ between modes for the same goal (limits counts transactions, ZBB counts assigned money);
 the Settings mode switch should mention that goals are recalculated.
+
+## Overview and Trends
+
+Goal contributions are money used this month, but they are not spending. So:
+
+- **Out of spending charts.** Transactions in a goal category are left out of the Overview
+  expense pie, the day bars, Trends category lines and Trends monthly expense bars. In ZBB,
+  goal-category activity is left out of `spentThisMonth` and the allocation chart's spending.
+- **Still counted as used.** The Overview hero gets a `saved` figure next to income and
+  expense, and `net = income - expense - saved`. That way money put toward a goal doesn't show
+  up as "left over".
+  - Limits mode: `saved` = the sum of `contributed(m)` across goals, the same number the goal
+    cards show.
+  - ZBB: `saved` = the sum of `assigned(c, m)` across goal categories. `FrontendZbbOverview`
+    gets `savedThisMonth`.
+- **Money spent from a goal** (ZBB only, since limits mode doesn't track it) is real spending,
+  but it's leaving the pie by the rule above. **(confirm)** whether a ZBB purchase from a goal
+  category should show in the pie (recommended yes for non-transfer expenses, so the month a
+  trip is paid for still shows the trip). Limits mode is unaffected: purchases go in a normal
+  category per the worked example.
+- Credit card cycle card and the Transactions list are untouched; they show real cash.
+- Trends doesn't get a "saved" series in v1. Easy to add later from the same numbers.
 
 ## Data model
 
@@ -221,11 +290,19 @@ deleteSavingsGoal(userId, goalId): Promise<void>
 getGoalNeedsForMonth(userId, month): Promise<Map<string, number>> // categoryId -> need cents, for ZBB
 ```
 
-Status: `NOT_STARTED` when `month < startMonth`, `FUNDED` when saved >= target, `OVERDUE` when
-`month > targetMonth`, `BEHIND` when `contributedThisMonth < needThisMonth` and it's the last
-month or the need has grown from the even split at creation, otherwise `ON_TRACK`. **(confirm
-the exact "behind" rule with ui-designer, the simple alternative is "this month not yet
-funded")**.
+Status, checked in this order:
+
+- `NOT_STARTED` when `month < startMonth`.
+- `FUNDED` when saved >= target.
+- `OVERDUE` when `month > targetMonth`.
+- `BEHIND` when the contributions in previous months didn't meet the plan, so this month's
+  amount had to be raised to finish on time. The plan is the even split of the goal over its
+  whole window, `allocateSpread(T - S0, G, monthsBetween(G, D) + 1)`, rebuilt from the
+  goal's current fields so editing the target or date resets it. Behind means
+  `progressBefore(m) < sum of planned shares for G <= k < m`. Comparing totals instead of
+  single months keeps rounding cents from flipping the status. This month's own contributions
+  don't change it; it only looks at months that are over.
+- `ON_TRACK` otherwise, including when the user is ahead.
 
 Validation (`ServiceValidationError`):
 
@@ -242,8 +319,11 @@ Existing services touched:
   Off-budget transfer totals per category come from the same transfer-counterpart lookup
   `categoryActivity` already does.
 - `zero-based-insights.ts`: goal shortfall and suggestion.
-- `overview.ts` / `trends.ts`: only if the "exclude goal categories from spending" question is
-  answered yes.
+- `overview.ts` / `trends.ts`: leave goal categories out of spending aggregates and add the
+  hero `saved` figure (see "Overview and Trends").
+- `zero-based-insights.ts` / `getZbbOverview`: `savedThisMonth`, goal activity out of
+  `spentThisMonth`.
+- `accounts.ts` and the account form: show the `onBudget` toggle in both modes.
 - `userData.ts`: export/import `SavingsGoal`, bump `USER_DATA_FORMAT_VERSION` to 3, keep
   accepting version 1 and 2 files.
 - `accountDeletion.ts`: covered by the user cascade, verify only.
@@ -293,7 +373,9 @@ E2E (`tests/e2e/savings-goals.spec.ts`):
 
 ## Implementation checklist
 
-- [ ] Owner confirms the **(confirm)** items above
+- [x] Owner decisions: monthly recalculation, no goal plus limit, out of spending charts but
+      counted as used, "behind" rule
+- [ ] Owner confirms the remaining **(confirm)** items above
 - [ ] Owner approves the schema change
 - [ ] software-architect review of contracts and the ZBB `targetTopUps` change
 - [ ] ui-designer spec for the goals section, dialog and ZBB markers
