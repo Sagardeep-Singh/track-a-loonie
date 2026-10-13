@@ -20,9 +20,10 @@ Closed state (one line per field, same height as an `Input`):
 
 - Trigger button shows `All accounts` / `All categories` when nothing is
   picked, the name when one is picked, or `3 selected` otherwise.
-- Selected items render as small removable chips under the trigger (each chip
-  has an `×` button labelled `Remove <name>`). Chips wrap, max two rows, then
-  `+N more`.
+- Once two or more items are picked, they render as small removable chips
+  under the trigger (each chip has an `×` button labelled `Remove <name>`).
+  At most 4 chips show, then `+N more`, which opens the panel. A single pick
+  needs no chip, since the trigger already shows its name.
 
 Open state (expands inline below the trigger, inside the dialog):
 
@@ -31,7 +32,8 @@ Open state (expands inline below the trigger, inside the dialog):
   with a checkbox mark per row. List is capped at roughly 6 rows (`max-h-56`).
 - Selected options are sorted to the top when the panel opens (not re-sorted
   while toggling, so rows don't jump under the cursor).
-- Footer row: `Clear` (empties this field's selection) and `Done` (closes).
+- Footer row: `Clear` (empties this field's selection), an `N of M selected`
+  count, and `Done` (closes).
 - Empty search result shows `No matches`.
 
 Why inline and not a floating popover: the dialog is a native `<dialog>` in
@@ -66,17 +68,17 @@ Apply, Reset, and URL sync logic in the dialog stay as they are.
 
 - `components/ui/multi-select.tsx` (new): generic
   `MultiSelect<{ id: string; name: string }>` with props `id`, `label`,
-  `options`, `selectedIds`, `onChange`, `placeholderAll`, `searchPlaceholder`,
+  `options`, `selectedIds`, `onChange`, `allLabel`, `searchPlaceholder`,
   `open`, `onOpenChange`. Open state is lifted so the dialog can enforce
   "one open at a time".
-- `lib/ui/filter-options.ts` (new): pure helpers, so the logic is unit
+- `lib/ui/multi-select.ts` (new): pure helpers, so the logic is unit
   testable without a DOM:
   - `filterOptionsByQuery(options, query)`: trims, case-insensitive contains.
   - `orderSelectedFirst(options, selectedIds)`: stable, selected on top.
   - `summarizeSelection(options, selectedIds, allLabel)`: trigger text.
 - `components/transactions/transaction-filters-dialog.tsx`: swap the two
-  checkbox blocks for `MultiSelect`, add `openField: 'accounts' | 'categories' | null`
-  state. Drop the now unused `toggleId` if nothing else uses it.
+  checkbox blocks for `MultiSelect`, add `openPicker: 'accounts' | 'categories' | null`
+  state. `toggleId` moves to the helpers as `toggleSelectedId`.
 
 ### Dependencies
 
@@ -100,7 +102,7 @@ component. See open question 1.
 
 ## Test plan
 
-Unit (`tests/unit/lib/filter-options.test.ts`):
+Unit (`tests/unit/lib/multi-select.test.ts`):
 
 - `filterOptionsByQuery`: empty and whitespace query return all; case
   insensitive; substring in the middle matches; no match returns `[]`;
@@ -130,19 +132,20 @@ E2E (extend `tests/e2e/mobile-transaction-filters.spec.ts`):
 - No change to the type pills, amount range, or toggle checkboxes.
 - Not reusing this component elsewhere in this PR (rules, budgets, etc.).
 
-## Open questions
+## Decisions
 
-1. Hand-rolled component (recommended, no new dependency) or add a library
-   such as `cmdk` or `@headlessui/react`?
-2. Use the picker for Accounts too, even though most users have few? Plan
-   assumes yes, for consistency and to keep the dialog short.
-3. Inline expanding panel (recommended) or a floating popover over the dialog?
+Implemented with the recommended answers to the open questions:
+
+1. Hand-rolled component, no new dependency.
+2. Accounts use the picker too, for consistency.
+3. Inline expanding panel, not a floating popover.
 
 ## Checklist
 
-- [ ] Confirm open questions
-- [ ] `lib/ui/filter-options.ts` helpers + unit tests
-- [ ] `components/ui/multi-select.tsx`
-- [ ] Wire into `transaction-filters-dialog.tsx`, one panel open at a time
-- [ ] Extend desktop and mobile e2e specs
-- [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
+- [x] Settle open questions (recommended answers, see Decisions)
+- [x] `lib/ui/multi-select.ts` helpers + unit tests
+- [x] `components/ui/multi-select.tsx`
+- [x] Wire into `transaction-filters-dialog.tsx`, one panel open at a time
+- [x] Extend desktop and mobile e2e specs
+- [x] Update `transactions-pagination.spec.ts`, which ticked the old checkboxes
+- [x] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`

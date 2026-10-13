@@ -95,6 +95,16 @@ const pickRange = async (from: string, to: string): Promise<void> => {
 };
 
 /** Opens the Filters dialog, lets `edit` change it, applies, and waits for the refetch. */
+/** Opens an account/category picker in the Filters dialog and toggles one option. */
+const togglePickerOption = async (
+  dialog: Locator,
+  trigger: string,
+  name: string,
+): Promise<void> => {
+  await dialog.locator(trigger).click();
+  await dialog.getByRole('option', { name, exact: true }).click();
+};
+
 const applyFilters = async (edit: (dialog: Locator) => Promise<void>): Promise<void> => {
   await page.getByRole('button', { name: /^Filters/ }).click();
   const dialog = page.getByRole('dialog');
@@ -394,17 +404,17 @@ test('4. every filter type narrows server-side, then widens again', async () => 
   await expect(salary).toBeHidden();
 
   // accountIds: widen to a second account, then narrow back
-  await applyFilters((d) => d.getByLabel(names.chips).check());
+  await applyFilters((d) => togglePickerOption(d, '#filter-accounts', names.chips));
   await expect(salary).toBeVisible();
   await expect(coffee).toBeVisible();
-  await applyFilters((d) => d.getByLabel(names.chips).uncheck());
+  await applyFilters((d) => togglePickerOption(d, '#filter-accounts', names.chips));
   await expect(salary).toBeHidden();
 
   // categoryIds
-  await applyFilters((d) => d.getByLabel(names.category).check());
+  await applyFilters((d) => togglePickerOption(d, '#filter-categories', names.category));
   await expect(coffee).toBeVisible();
   await expect(groceries).toBeHidden();
-  await applyFilters((d) => d.getByLabel(names.category).uncheck());
+  await applyFilters((d) => togglePickerOption(d, '#filter-categories', names.category));
   await expect(groceries).toBeVisible();
 
   // from / to (inclusive single day) — the period selector's params, now outside the dialog

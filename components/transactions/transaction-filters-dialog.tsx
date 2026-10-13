@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
+import { MultiSelect } from '@/components/ui/multi-select';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { FrontendCategory } from '@/lib/services/categories';
 import {
@@ -13,9 +14,6 @@ import {
 
 const checkboxRow = 'text-ink flex items-center gap-2 text-sm';
 const checkboxInput = 'accent-iris h-4 w-4 shrink-0';
-
-const toggleId = (ids: string[], id: string): string[] =>
-  ids.includes(id) ? ids.filter((existing) => existing !== id) : [...ids, id];
 
 export const TransactionFiltersDialog = ({
   open,
@@ -41,6 +39,8 @@ export const TransactionFiltersDialog = ({
   // cancelled draft, mirroring this file's existing `dialogKey`/`drawerKey`
   // convention in `transactions-view.tsx` instead of an effect.
   const [draft, setDraft] = useState<TransactionFilters>(filters);
+  // One picker open at a time keeps the dialog's height bounded.
+  const [openPicker, setOpenPicker] = useState<'accounts' | 'categories' | null>(null);
 
   const handleClose = (): void => {
     setDraft(filters);
@@ -61,48 +61,31 @@ export const TransactionFiltersDialog = ({
     <Modal open={open} onClose={handleClose} title="Filters" className="max-w-lg">
       <div className="flex flex-col gap-5">
         {accounts.length > 0 && (
-          <div>
-            <Label htmlFor="filter-accounts">Accounts</Label>
-            <div id="filter-accounts" className="flex flex-col gap-1.5">
-              {accounts.map((account) => (
-                <label key={account.id} className={checkboxRow}>
-                  <input
-                    type="checkbox"
-                    className={checkboxInput}
-                    checked={draft.accountIds.includes(account.id)}
-                    onChange={() =>
-                      setDraft({ ...draft, accountIds: toggleId(draft.accountIds, account.id) })
-                    }
-                  />
-                  {account.name}
-                </label>
-              ))}
-            </div>
-          </div>
+          <MultiSelect
+            id="filter-accounts"
+            label="Accounts"
+            options={accounts}
+            selectedIds={draft.accountIds}
+            onChange={(accountIds) => setDraft({ ...draft, accountIds })}
+            allLabel="All accounts"
+            searchPlaceholder="Search accounts"
+            open={openPicker === 'accounts'}
+            onOpenChange={(open) => setOpenPicker(open ? 'accounts' : null)}
+          />
         )}
 
         {categories.length > 0 && (
-          <div>
-            <Label htmlFor="filter-categories">Categories</Label>
-            <div id="filter-categories" className="flex max-h-40 flex-col gap-1.5 overflow-y-auto">
-              {categories.map((category) => (
-                <label key={category.id} className={checkboxRow}>
-                  <input
-                    type="checkbox"
-                    className={checkboxInput}
-                    checked={draft.categoryIds.includes(category.id)}
-                    onChange={() =>
-                      setDraft({
-                        ...draft,
-                        categoryIds: toggleId(draft.categoryIds, category.id),
-                      })
-                    }
-                  />
-                  {category.name}
-                </label>
-              ))}
-            </div>
-          </div>
+          <MultiSelect
+            id="filter-categories"
+            label="Categories"
+            options={categories}
+            selectedIds={draft.categoryIds}
+            onChange={(categoryIds) => setDraft({ ...draft, categoryIds })}
+            allLabel="All categories"
+            searchPlaceholder="Search categories"
+            open={openPicker === 'categories'}
+            onOpenChange={(open) => setOpenPicker(open ? 'categories' : null)}
+          />
         )}
 
         <div>
