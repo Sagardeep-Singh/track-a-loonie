@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ArrowRightLeft, Check, PiggyBank, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
@@ -66,7 +67,14 @@ export const ZeroBasedView = ({
 }: {
   initialMonth: FrontendZbbMonth;
 }): React.ReactElement => {
-  const [data, setData] = useState(initialMonth);
+  const router = useRouter();
+  const [data, setMonthData] = useState(initialMonth);
+  // the screen updates from each response; the refresh is for the server-rendered
+  // parts around it, like the savings goal cards that count assignments
+  const setData = (next: FrontendZbbMonth): void => {
+    setMonthData(next);
+    router.refresh();
+  };
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

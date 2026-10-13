@@ -159,6 +159,7 @@ const DashboardPage = async ({
     budgetRings.length === 0 &&
     Number(hero.income) === 0 &&
     Number(hero.expense) === 0 &&
+    Number(hero.saved) === 0 &&
     !cycleCard;
 
   // With ?day= present, below lg the Day panel *is* the screen (per the plan's

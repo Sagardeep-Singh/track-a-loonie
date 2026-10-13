@@ -55,11 +55,15 @@ const BudgetsPage = async ({
   );
 
   if (zeroBased) {
+    const goalsKey = goals
+      .map((g) => `${g.id}:${g.targetAmount}:${g.targetMonth}:${g.startingAmount}`)
+      .join('|');
     const zbbMonth = await getZbbMonth(userId, month);
     return (
       <div className="animate-[fade-up_0.3s_ease-out]">
         {header('Give every dollar a job. Leftovers roll over to next month.')}
-        <ZeroBasedView key={month} initialMonth={zbbMonth} />
+        {/* keyed by the goals too: adding or changing one changes rows and targets */}
+        <ZeroBasedView key={`${month}:${goalsKey}`} initialMonth={zbbMonth} />
         {goalsSection}
       </div>
     );

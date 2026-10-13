@@ -269,16 +269,26 @@ validation error for a category with a limit.
 ## Implementation checklist
 
 - [x] Owner decisions locked
-- [ ] Prisma model + migration
-- [ ] `lib/budgets/savings-goal-math.ts` + unit tests
-- [ ] `lib/validators/savings-goals.ts` + unit tests
-- [ ] `lib/services/savingsGoals.ts` + unit tests
-- [ ] `budgets.ts` mutual exclusion
-- [ ] ZBB integration (targets, assign to targets, insights)
-- [ ] Overview and Trends: saved figure, coverage exclusion
-- [ ] API routes
-- [ ] UI: goals section and dialog on Budgets (both modes), ZBB row marker, hero saved figure,
+- [x] Prisma model + migration
+- [x] `lib/budgets/savings-goal-math.ts` + unit tests
+- [x] `lib/validators/savings-goals.ts` + unit tests
+- [x] `lib/services/savingsGoals.ts` + unit tests
+- [x] `budgets.ts` mutual exclusion
+- [x] ZBB integration (targets, assign to targets, insights)
+- [x] Overview and Trends: saved figure, coverage exclusion
+- [x] API routes
+- [x] UI: goals section and dialog on Budgets (both modes), ZBB row marker, hero saved figure,
       spending account toggle in both modes
-- [ ] Data export/import v3
-- [ ] E2E spec
-- [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
+- [x] Data export/import v3
+- [x] E2E spec
+- [x] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
+
+## Implementation notes
+
+- The zero-based view keeps its own state between server refreshes, so the page keys it by
+  month plus the goals' definitions (adding or editing a goal remounts it), and the view calls
+  `router.refresh()` after its writes so the goal cards pick up new assignments.
+- The Overview's empty state also checks `saved`, otherwise a month with only goal activity
+  (contributions are transfers, covered spending isn't an expense) showed as empty.
+- Known gap: the Overview "Net" drilldown on Transactions still lists income minus spending,
+  so it doesn't subtract saved money the way the hero's net does.
