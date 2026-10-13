@@ -60,4 +60,9 @@ describe('savings goal validators', () => {
     });
     expect(savingsGoalsQuerySchema.parse({})).toEqual({ includeArchived: false });
   });
+
+  it('rejects a target month whose month part is not 01-12', () => {
+    expect(updateSavingsGoalSchema.safeParse({ ...base, targetMonth: 202713 }).success).toBe(false);
+    expect(updateSavingsGoalSchema.safeParse({ ...base, targetMonth: 202700 }).success).toBe(false);
+  });
 });

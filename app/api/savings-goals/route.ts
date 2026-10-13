@@ -33,7 +33,7 @@ export const POST = async (request: Request): Promise<NextResponse> => {
     return userId;
   }
 
-  const parsed = createSavingsGoalSchema.safeParse(await request.json());
+  const parsed = createSavingsGoalSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }

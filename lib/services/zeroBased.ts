@@ -527,7 +527,8 @@ export const getZbbOverview = async (
     readyToAssign: zbb.readyToAssign,
     incomeThisMonth: fromCents(toCents(income._sum.amount ?? 0)),
     assignedThisMonth: sum((c) => c.assignedCents),
-    savedThisMonth: sum((c) => (c.isGoal ? c.assignedCents : 0)),
+    // archived goals included, same as the Overview's saved figure
+    savedThisMonth: fromCents(goalEffects.savedByMonth.get(month) ?? 0),
     spentThisMonth: fromCents(
       categories.reduce(
         (total, c) => total + (goalEffects.goalCategoryIds.has(c.categoryId) ? 0 : c.activityCents),

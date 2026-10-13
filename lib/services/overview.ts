@@ -168,12 +168,13 @@ export const getOverviewData = async (
   // Spending a savings goal covers was already counted as saved in the months
   // it was put aside, so only the part past what was saved is an expense here.
   const netExpenseAmount = (t: (typeof transactions)[number]): number =>
+    // in cents, so a reimbursed and covered expense can't leave a float residue
     Math.max(
       0,
-      Number(t.amount) -
-        (reimbursedByTransaction.get(t.id) ?? 0) -
-        (goalEffects.coveredByTransaction.get(t.id) ?? 0) / 100,
-    );
+      Math.round(Number(t.amount) * 100) -
+        Math.round((reimbursedByTransaction.get(t.id) ?? 0) * 100) -
+        (goalEffects.coveredByTransaction.get(t.id) ?? 0),
+    ) / 100;
   // Only the part of an income linked as a reimbursement is excluded; any
   // unlinked remainder is still ordinary income.
   const netIncomeAmount = (t: (typeof transactions)[number]): number =>

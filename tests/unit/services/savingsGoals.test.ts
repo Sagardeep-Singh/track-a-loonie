@@ -171,6 +171,79 @@ describe('listSavingsGoals (zero-based)', () => {
   });
 });
 
+describe('goal activity queries', () => {
+  it('scopes spending and zero-based assignment queries to the user and the goal categories', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      mode: 'ZERO_BASED',
+      zbbStartMonth: 202609,
+    });
+    prismaMock.savingsGoal.findMany.mockResolvedValue([goalRow()]);
+
+    await listSavingsGoals('u1', 202612);
+
+    expect(prismaMock.userBudgetSettings.findUnique).toHaveBeenCalledWith({
+      where: { userId: 'u1' },
+    });
+    expect(prismaMock.transaction.findMany.mock.calls[0][0].where).toMatchObject({
+      userId: 'u1',
+      categoryId: { in: ['cat-trip'] },
+      type: 'EXPENSE',
+      isTransfer: false,
+    });
+    expect(prismaMock.categoryAssignment.findMany.mock.calls[0][0].where).toMatchObject({
+      userId: 'u1',
+      categoryId: { in: ['cat-trip'] },
+    });
+  });
+
+  it('lets a negative zero-based assignment lower progress', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      mode: 'ZERO_BASED',
+      zbbStartMonth: 202609,
+    });
+    prismaMock.savingsGoal.findMany.mockResolvedValue([goalRow()]);
+    prismaMock.categoryAssignment.findMany.mockResolvedValue([
+      { categoryId: 'cat-trip', month: 202610, amount: 500 },
+      { categoryId: 'cat-trip', month: 202611, amount: -200 },
+    ]);
+
+    const [goal] = await listSavingsGoals('u1', 202611);
+
+    expect(goal.saved).toBe('300.00');
+    expect(goal.contributedThisMonth).toBe('-200.00');
+  });
+
+  it('ignores spending dated before the goal started', async () => {
+    prismaMock.savingsGoal.findMany.mockResolvedValue([goalRow()]);
+    mockTransactions({
+      transfers: [{ categoryId: 'cat-trip', amount: 500, date: '2026-10-05', type: 'EXPENSE' }],
+      spends: [
+        { id: 'old', categoryId: 'cat-trip', amount: 80, date: '2026-09-20' },
+        { id: 'new', categoryId: 'cat-trip', amount: 50, date: '2026-10-20' },
+      ],
+    });
+
+    const [goal] = await listSavingsGoals('u1', 202610);
+    expect(goal.spent).toBe('50.00');
+    expect(goal.balance).toBe('450.00');
+
+    const effects = await getGoalEffects('u1', 202610);
+    expect(effects.coveredByTransaction).toEqual(new Map([['new', 5000]]));
+    expect(effects.uncoveredByMonth.size).toBe(0);
+  });
+
+  it('counts the starting amount toward covering spending', async () => {
+    prismaMock.savingsGoal.findMany.mockResolvedValue([goalRow({ startingAmount: 100 })]);
+    mockTransactions({
+      spends: [{ id: 's1', categoryId: 'cat-trip', amount: 130, date: '2026-10-20' }],
+    });
+
+    const effects = await getGoalEffects('u1', 202610);
+    expect(effects.coveredByTransaction).toEqual(new Map([['s1', 10000]]));
+    expect(effects.uncoveredByMonth).toEqual(new Map([[202610, 3000]]));
+  });
+});
+
 describe('createSavingsGoal', () => {
   const input = { targetAmount: 3000, targetMonth: 202708, startingAmount: 0 };
 

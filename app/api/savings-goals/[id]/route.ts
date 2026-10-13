@@ -18,7 +18,7 @@ export const PATCH = async (request: Request, { params }: RouteParams): Promise<
   }
 
   const { id } = await params;
-  const body: unknown = await request.json();
+  const body: unknown = await request.json().catch(() => null);
   const archive = archiveSavingsGoalSchema.safeParse(body);
   const update = archive.success ? null : updateSavingsGoalSchema.safeParse(body);
   if (update && !update.success) {

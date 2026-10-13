@@ -121,6 +121,59 @@ describe('computeGoalMonth', () => {
   });
 });
 
+describe('computeGoalMonth edge cases', () => {
+  it('is behind in the target month itself and asks for the whole remainder', () => {
+    const result = computeGoalMonth(trip, contributions([[202610, 27273]]), 202708);
+    expect(result.monthsLeft).toBe(1);
+    expect(result.needCents).toBe(272727);
+    expect(result.status).toBe('BEHIND');
+  });
+
+  it('is funded rather than overdue when the target was reached late', () => {
+    const result = computeGoalMonth(trip, contributions([[202610, 300000]]), 202710);
+    expect(result.status).toBe('FUNDED');
+    expect(result.needCents).toBe(0);
+    expect(result.schedule).toEqual([]);
+  });
+
+  it('lets withdrawals push progress negative and spreads the larger remainder', () => {
+    const result = computeGoalMonth(trip, contributions([[202610, -50000]]), 202611);
+    expect(result.progressBeforeCents).toBe(-50000);
+    expect(result.savedCents).toBe(-50000);
+    expect(result.needCents).toBe(35000);
+    expect(result.status).toBe('BEHIND');
+  });
+
+  it('measures behind against the plan for what was left after the starting amount', () => {
+    const goal: GoalDefinition = { ...trip, startingCents: 100000, targetMonth: 202709 };
+    // 12 months to plan $2,000: 166.67 first
+    expect(computeGoalMonth(goal, new Map(), 202611).status).toBe('BEHIND');
+    expect(computeGoalMonth(goal, contributions([[202610, 16667]]), 202611).status).toBe(
+      'ON_TRACK',
+    );
+  });
+
+  it('handles a goal whose target month is its start month', () => {
+    const goal: GoalDefinition = { ...trip, targetMonth: 202610 };
+    const result = computeGoalMonth(goal, new Map(), 202610);
+    expect(result.monthsLeft).toBe(1);
+    expect(result.needCents).toBe(300000);
+    expect(result.status).toBe('ON_TRACK');
+  });
+
+  it('resets the plan when the target is edited after contributions', () => {
+    const history = contributions([
+      [202610, 27273],
+      [202611, 27273],
+    ]);
+    const edited: GoalDefinition = { ...trip, targetCents: 150000 };
+    const result = computeGoalMonth(edited, history, 202612);
+    // 1500 / 11 = 136.36 planned a month, so $545.46 saved is ahead
+    expect(result.status).toBe('ON_TRACK');
+    expect(result.needCents).toBe(Math.ceil((150000 - 54546) / 9));
+  });
+});
+
 describe('plannedBeforeCents', () => {
   it('sums the original split for elapsed months only', () => {
     expect(plannedBeforeCents(trip, 202610)).toBe(0);

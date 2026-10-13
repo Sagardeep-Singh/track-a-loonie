@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-const monthSchema = z.coerce.number().int().min(190001).max(299912);
+const monthSchema = z.coerce
+  .number()
+  .int()
+  .min(190001)
+  .max(299912)
+  .refine((v) => v % 100 >= 1 && v % 100 <= 12, { message: 'Invalid month' });
 
 // two decimal places max, same money shape the rest of the app stores
 const moneySchema = z.coerce
