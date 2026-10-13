@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { prismaMock, spreadFindMany } = vi.hoisted(() => ({
+const { prismaMock, spreadFindMany, goalFindMany } = vi.hoisted(() => ({
   spreadFindMany: vi.fn(),
+  goalFindMany: vi.fn(),
   prismaMock: {
+    savingsGoal: { findMany: vi.fn() },
+    userBudgetSettings: { findUnique: vi.fn() },
     transaction: { findMany: vi.fn() },
     reimbursementLink: { findMany: vi.fn() },
   },
@@ -17,13 +20,21 @@ vi.mock('@/lib/db/prisma', () => ({
     transaction: {
       ...prismaMock.transaction,
       findMany: (args?: {
-        where?: { reimbursementCompletedAt?: unknown; spreadEndMonth?: unknown };
+        where?: {
+          reimbursementCompletedAt?: unknown;
+          spreadEndMonth?: unknown;
+          isReimbursable?: unknown;
+          account?: unknown;
+        };
       }) =>
         args?.where?.reimbursementCompletedAt
           ? Promise.resolve([])
           : args?.where?.spreadEndMonth
             ? spreadFindMany(args)
-            : prismaMock.transaction.findMany(args),
+            : // savings goal spending and contribution lookups
+              args?.where?.isReimbursable === false || args?.where?.account
+              ? goalFindMany(args)
+              : prismaMock.transaction.findMany(args),
     },
   },
 }));
@@ -34,6 +45,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
   spreadFindMany.mockResolvedValue([]);
+  prismaMock.savingsGoal.findMany.mockResolvedValue([]);
+  prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
+  goalFindMany.mockResolvedValue([]);
 });
 
 describe('getSpendingTrends', () => {
@@ -349,5 +363,68 @@ describe('getSpendingTrends', () => {
     const result = await getSpendingTrends('user-1', { month: 202602, range: 3 });
 
     expect(result.movers[0]).toMatchObject({ categoryName: 'Dining', amount: -10, tone: 'sky' });
+  });
+
+  it('leaves spending a savings goal covers out of totals and category lines', async () => {
+    prismaMock.savingsGoal.findMany.mockResolvedValue([
+      {
+        id: 'g1',
+        categoryId: 'cat-trip',
+        targetAmount: 1000,
+        targetMonth: 202602,
+        startMonth: 202512,
+        startingAmount: 0,
+        archivedAt: null,
+        category: { name: 'Trip' },
+      },
+    ]);
+    goalFindMany.mockImplementation(async (args: { where: { account?: unknown } }) =>
+      args.where.account
+        ? [
+            {
+              categoryId: 'cat-trip',
+              amount: 1000,
+              date: new Date(Date.UTC(2025, 11, 5)),
+              type: 'EXPENSE',
+            },
+          ]
+        : [
+            {
+              id: 'trip',
+              categoryId: 'cat-trip',
+              amount: 1200,
+              date: new Date(Date.UTC(2026, 1, 10)),
+            },
+          ],
+    );
+    const base = { isPayment: false, reimbursementIncomeLinks: [], spreadMonths: null };
+    prismaMock.transaction.findMany.mockResolvedValue([
+      {
+        ...base,
+        id: 'trip',
+        type: 'EXPENSE',
+        amount: 1200,
+        date: new Date(Date.UTC(2026, 1, 10)),
+        isTransfer: false,
+        category: { id: 'cat-trip', name: 'Trip' },
+      },
+      {
+        ...base,
+        id: 'contribution',
+        type: 'EXPENSE',
+        amount: 1000,
+        date: new Date(Date.UTC(2025, 11, 5)),
+        isTransfer: true,
+        category: { id: 'cat-trip', name: 'Trip' },
+      },
+    ]);
+
+    const result = await getSpendingTrends('user-1', { month: 202602, range: 3 });
+
+    expect(result.months.map((m) => [m.month, m.expense])).toEqual([
+      [202512, 0],
+      [202601, 0],
+      [202602, 200],
+    ]);
   });
 });

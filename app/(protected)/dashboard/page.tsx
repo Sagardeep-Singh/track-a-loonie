@@ -278,6 +278,16 @@ const DashboardPage = async ({
                               {money(hero.expense)}
                             </div>
                           </Link>
+                          {Number(hero.saved) !== 0 && (
+                            <Link href="/budgets" className="group">
+                              <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
+                                Saved
+                              </div>
+                              <div className="text-iris mt-1.5 font-mono text-lg tabular-nums group-hover:underline">
+                                {money(hero.saved)}
+                              </div>
+                            </Link>
+                          )}
                           <Link href={overviewNetHref(data.month)} className="group">
                             <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
                               Net
@@ -536,6 +546,12 @@ const DashboardPage = async ({
                   </div>
                 </Link>
               </div>
+              {Number(hero.saved) !== 0 && (
+                <Link href="/budgets" className="mt-3 flex items-baseline justify-between gap-2.5">
+                  <span className="text-ink-muted text-[13px]">Saved toward goals</span>
+                  <span className="text-iris font-mono text-[15px]">{money(hero.saved)}</span>
+                </Link>
+              )}
               <div className="bg-line my-3.5 h-px" />
               <Link
                 href={overviewNetHref(data.month)}
@@ -546,6 +562,8 @@ const DashboardPage = async ({
               </Link>
               <p className="text-ink-muted mt-2.5 text-[11.5px] leading-relaxed">
                 Excludes transfers between your own accounts.
+                {Number(hero.saved) !== 0 &&
+                  ' Money saved toward goals is taken out of net, and spending it later isn’t counted again.'}
               </p>
             </div>
 

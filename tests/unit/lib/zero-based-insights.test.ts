@@ -40,7 +40,10 @@ const ids = (result: ReturnType<typeof buildZbbInsights>): string[] =>
 
 describe('buildZbbInsights health', () => {
   it("measures a savings goal against this month's assignment, not its balance", () => {
-    const goal = { ...cat('Trip', { carried: 545.46, assigned: 100, target: 272.73 }), isGoal: true };
+    const goal = {
+      ...cat('Trip', { carried: 545.46, assigned: 100, target: 272.73 }),
+      isGoal: true,
+    };
     const limit = cat('Dining', { carried: 545.46, assigned: 100, target: 272.73 });
     const result = buildZbbInsights(input({ categories: [goal, limit] }));
     const byId = new Map(result.health.map((h) => [h.categoryId, h]));

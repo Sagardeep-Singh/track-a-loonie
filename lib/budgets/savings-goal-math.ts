@@ -42,7 +42,11 @@ export const plannedBeforeCents = (goal: GoalDefinition, month: number): number 
   const totalMonths = monthsBetween(goal.startMonth, goal.targetMonth) + 1;
   const elapsed = Math.min(Math.max(monthsBetween(goal.startMonth, month), 0), totalMonths);
   if (elapsed === 0) return 0;
-  const plan = allocateSpread(Math.max(0, goal.targetCents - goal.startingCents), goal.startMonth, totalMonths);
+  const plan = allocateSpread(
+    Math.max(0, goal.targetCents - goal.startingCents),
+    goal.startMonth,
+    totalMonths,
+  );
   return plan.slice(0, elapsed).reduce((sum, share) => sum + share.cents, 0);
 };
 

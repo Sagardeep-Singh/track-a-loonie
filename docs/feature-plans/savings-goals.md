@@ -141,14 +141,14 @@ as normal expenses through their existing rules.
 Goal: **Trip to Japan**, $3,000 by August 2027, created October 2026, no starting amount. That
 is 11 months. The user has a chequing account (spending) and a savings account (not spending).
 
-| Month    | Saved before | Months left | Need     | What the user does                                                  | Counted  |
-| -------- | ------------ | ----------- | -------- | ------------------------------------------------------------------- | -------- |
-| Oct 2026 | $0.00        | 11          | $272.73  | Transfers $272.73 chequing to savings, categorized Trip to Japan    | +$272.73 |
-| Nov 2026 | $272.73      | 10          | $272.73  | Forgets                                                             | $0       |
-| Dec 2026 | $272.73      | 9           | $303.03  | Behind ($545.46 planned so far). Transfers $500                     | +$500.00 |
-| Jan 2027 | $772.73      | 8           | $278.41  | Still behind ($818.19 planned so far). Transfers $278.41            | +$278.41 |
-| Mar 2027 | ...          | ...         | goes up  | Moves $200 savings to chequing for a car repair, Trip to Japan      | −$200.00 |
-| Aug 2027 | $3,000       | 1           | $0       | Books $1,400 flights and $1,200 hotel, categorized Trip to Japan    | spend    |
+| Month    | Saved before | Months left | Need    | What the user does                                               | Counted  |
+| -------- | ------------ | ----------- | ------- | ---------------------------------------------------------------- | -------- |
+| Oct 2026 | $0.00        | 11          | $272.73 | Transfers $272.73 chequing to savings, categorized Trip to Japan | +$272.73 |
+| Nov 2026 | $272.73      | 10          | $272.73 | Forgets                                                          | $0       |
+| Dec 2026 | $272.73      | 9           | $303.03 | Behind ($545.46 planned so far). Transfers $500                  | +$500.00 |
+| Jan 2027 | $772.73      | 8           | $278.41 | Still behind ($818.19 planned so far). Transfers $278.41         | +$278.41 |
+| Mar 2027 | ...          | ...         | goes up | Moves $200 savings to chequing for a car repair, Trip to Japan   | −$200.00 |
+| Aug 2027 | $3,000       | 1           | $0      | Books $1,400 flights and $1,200 hotel, categorized Trip to Japan | spend    |
 
 - Each month's contribution shows as Saved on the Overview and lowers that month's net.
 - In August the $2,600 is covered by the goal: August's expenses don't go up, and the goal
@@ -160,13 +160,13 @@ is 11 months. The user has a chequing account (spending) and a savings account (
 Same goal. Carryover doesn't shrink the monthly amount, because progress is what was assigned,
 not the envelope's balance. Existing limit targets top up to the balance; goals don't.
 
-| Month | Carried in | Assigned before | Need     | You do                                      | Available after |
-| ----- | ---------- | --------------- | -------- | ------------------------------------------- | --------------- |
-| Oct   | $0         | $0              | $272.73  | Assign $272.73                              | $272.73         |
-| Nov   | $272.73    | $272.73         | $272.73  | "Assign to targets" adds $272.73 (not $0)   | $545.46         |
-| Dec   | $545.46    | $545.46         | $272.73  | Assign $500 (ahead)                         | $1,045.46       |
-| Jan   | $1,045.46  | $1,045.46       | $244.32  | Being ahead lowers it                       | ...             |
-| Feb   | ...        | ...             | same     | Pay a $400 flight deposit from the envelope | drops by $400   |
+| Month | Carried in | Assigned before | Need    | You do                                      | Available after |
+| ----- | ---------- | --------------- | ------- | ------------------------------------------- | --------------- |
+| Oct   | $0         | $0              | $272.73 | Assign $272.73                              | $272.73         |
+| Nov   | $272.73    | $272.73         | $272.73 | "Assign to targets" adds $272.73 (not $0)   | $545.46         |
+| Dec   | $545.46    | $545.46         | $272.73 | Assign $500 (ahead)                         | $1,045.46       |
+| Jan   | $1,045.46  | $1,045.46       | $244.32 | Being ahead lowers it                       | ...             |
+| Feb   | ...        | ...             | same    | Pay a $400 flight deposit from the envelope | drops by $400   |
 
 The Feb deposit lowers available but not progress, so the need doesn't rise, the goal isn't
 behind, and the $400 isn't counted in February's spending.

@@ -177,8 +177,8 @@ describe('createSavingsGoal', () => {
   beforeEach(() => {
     prismaMock.savingsGoal.count.mockResolvedValue(0);
     prismaMock.budget.count.mockResolvedValue(0);
-    prismaMock.savingsGoal.create.mockImplementation(async (args: { data: Record<string, unknown> }) =>
-      goalRow(args.data),
+    prismaMock.savingsGoal.create.mockImplementation(
+      async (args: { data: Record<string, unknown> }) => goalRow(args.data),
     );
   });
 

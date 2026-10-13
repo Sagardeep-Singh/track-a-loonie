@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db/prisma';
 import { listBudgets } from '@/lib/services/budgets';
 import { getCategorizeQueueStats } from '@/lib/services/categorize';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
+import { getGoalEffects } from '@/lib/services/savingsGoals';
 import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 import { getStatementPeriod } from '@/lib/statement';
 
@@ -78,6 +79,9 @@ export type OverviewData = {
     paceTone: 'sky' | 'rose' | 'neutral';
     income: string;
     expense: string;
+    /** put toward savings goals this month; used, but not spending */
+    saved: string;
+    /** income - expense - saved */
     net: string;
   };
   budgetRings: OverviewBudgetRing[];
@@ -123,23 +127,25 @@ export const getOverviewData = async (
   const now = new Date();
   const todayOfMonth = isCurrentMonth ? now.getUTCDate() : daysInMonth;
 
-  const [budgets, transactions, cardAccount, reimbursedExpenses, spreadShares] = await Promise.all([
-    listBudgets(userId, month),
-    prisma.transaction.findMany({
-      where: { userId, date: { gte: start, lt: end } },
-      include: {
-        category: { select: { name: true } },
-        reimbursementIncomeLinks: { select: { amount: true } },
-      },
-      orderBy: { date: 'asc' },
-    }),
-    prisma.account.findFirst({
-      where: { userId, type: 'CREDIT_CARD', statementDay: { not: null } },
-      orderBy: { createdAt: 'asc' },
-    }),
-    listReimbursedAmountsByExpenseDate(userId, start, end),
-    listSpreadSharesInRange(userId, month, month),
-  ]);
+  const [budgets, transactions, cardAccount, reimbursedExpenses, spreadShares, goalEffects] =
+    await Promise.all([
+      listBudgets(userId, month),
+      prisma.transaction.findMany({
+        where: { userId, date: { gte: start, lt: end } },
+        include: {
+          category: { select: { name: true } },
+          reimbursementIncomeLinks: { select: { amount: true } },
+        },
+        orderBy: { date: 'asc' },
+      }),
+      prisma.account.findFirst({
+        where: { userId, type: 'CREDIT_CARD', statementDay: { not: null } },
+        orderBy: { createdAt: 'asc' },
+      }),
+      listReimbursedAmountsByExpenseDate(userId, start, end),
+      listSpreadSharesInRange(userId, month, month),
+      getGoalEffects(userId, month),
+    ]);
 
   // A spread expense is still listed on its own day, but its amount counts
   // through its monthly shares (possibly from a payment dated in another
@@ -159,8 +165,15 @@ export const getOverviewData = async (
       (reimbursedByTransaction.get(r.expenseTransactionId) ?? 0) + Number(r.amount),
     );
   }
+  // Spending a savings goal covers was already counted as saved in the months
+  // it was put aside, so only the part past what was saved is an expense here.
   const netExpenseAmount = (t: (typeof transactions)[number]): number =>
-    Math.max(0, Number(t.amount) - (reimbursedByTransaction.get(t.id) ?? 0));
+    Math.max(
+      0,
+      Number(t.amount) -
+        (reimbursedByTransaction.get(t.id) ?? 0) -
+        (goalEffects.coveredByTransaction.get(t.id) ?? 0) / 100,
+    );
   // Only the part of an income linked as a reimbursement is excluded; any
   // unlinked remainder is still ordinary income.
   const netIncomeAmount = (t: (typeof transactions)[number]): number =>
@@ -186,6 +199,7 @@ export const getOverviewData = async (
   const expense =
     transactions.filter(isCountedExpense).reduce((sum, t) => sum + netExpenseAmount(t), 0) +
     spreadTotal;
+  const saved = (goalEffects.savedByMonth.get(month) ?? 0) / 100;
 
   // Every expense this month, by category — unlike budgetRings this isn't
   // limited to categories that have a budget set. Net of reimbursements, same
@@ -202,7 +216,9 @@ export const getOverviewData = async (
   };
   for (const t of transactions) {
     if (!isCountedExpense(t)) continue;
-    addToCategory(t.categoryId, t.category?.name ?? null, netExpenseAmount(t));
+    const amount = netExpenseAmount(t);
+    // fully covered goal spending isn't a slice; a zero slice would still show
+    if (amount > 0) addToCategory(t.categoryId, t.category?.name ?? null, amount);
   }
   for (const s of spreadShares) addToCategory(s.categoryId, s.categoryName, Number(s.amount));
   const sortedExpenseSlices = [...expenseTotalsByCategory.entries()]
@@ -338,7 +354,8 @@ export const getOverviewData = async (
       paceTone: limit === 0 ? 'neutral' : pacedUnder ? 'sky' : 'rose',
       income: income.toFixed(2),
       expense: expense.toFixed(2),
-      net: (income - expense).toFixed(2),
+      saved: saved.toFixed(2),
+      net: (income - expense - saved).toFixed(2),
     },
     budgetRings: budgets.slice(0, 4).map((b) => {
       const budgetLimit = Number(b.limitAmount);

@@ -19,6 +19,7 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
     reimbursementLinks,
     categoryAssignments,
     budgetSettings,
+    savingsGoals,
   ] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, name: true } }),
     prisma.account.findMany({
@@ -115,6 +116,20 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
       where: { userId },
       select: { mode: true, zbbStartMonth: true },
     }),
+    prisma.savingsGoal.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        categoryId: true,
+        targetAmount: true,
+        targetMonth: true,
+        startMonth: true,
+        startingAmount: true,
+        archivedAt: true,
+        createdAt: true,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    }),
   ]);
 
   return {
@@ -203,6 +218,16 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
       budgetSettings: budgetSettings
         ? { mode: budgetSettings.mode, zbbStartMonth: budgetSettings.zbbStartMonth }
         : null,
+      savingsGoals: savingsGoals.map((g) => ({
+        id: g.id,
+        categoryId: g.categoryId,
+        targetAmount: decimalToString(g.targetAmount),
+        targetMonth: g.targetMonth,
+        startMonth: g.startMonth,
+        startingAmount: decimalToString(g.startingAmount),
+        archivedAt: g.archivedAt,
+        createdAt: g.createdAt,
+      })),
     },
   };
 };
@@ -227,6 +252,7 @@ export const wipeUserData = async (tx: Prisma.TransactionClient, userId: string)
   await tx.reimbursementLink.deleteMany({ where: { userId } });
   await tx.budget.deleteMany({ where: { userId } });
   await tx.categoryAssignment.deleteMany({ where: { userId } });
+  await tx.savingsGoal.deleteMany({ where: { userId } });
   await tx.categoryRule.deleteMany({ where: { userId } });
   await tx.transaction.deleteMany({ where: { userId } });
   await tx.importBatch.deleteMany({ where: { userId } });
@@ -254,6 +280,7 @@ export type ImportUserDataResult = {
     categoryRules: number;
     reimbursementLinks: number;
     categoryAssignments: number;
+    savingsGoals: number;
   };
 };
 
@@ -418,6 +445,22 @@ export const importUserData = async (
         });
       }
 
+      for (const rows of chunk(data.savingsGoals ?? [], CREATE_MANY_CHUNK_SIZE)) {
+        await tx.savingsGoal.createMany({
+          data: rows.map((g) => ({
+            id: randomUUID(),
+            userId,
+            categoryId: categoryIds.get(g.categoryId)!,
+            targetAmount: g.targetAmount,
+            targetMonth: g.targetMonth,
+            startMonth: g.startMonth,
+            startingAmount: g.startingAmount,
+            archivedAt: g.archivedAt,
+            createdAt: g.createdAt,
+          })),
+        });
+      }
+
       // a v1 file says nothing about the budgeting mode, so the current one
       // stays; a v2 file carries it (null = never changed, i.e. LIMITS)
       if (data.budgetSettings !== undefined) {
@@ -440,6 +483,7 @@ export const importUserData = async (
       categoryRules: data.categoryRules.length,
       reimbursementLinks: data.reimbursementLinks.length,
       categoryAssignments: data.categoryAssignments?.length ?? 0,
+      savingsGoals: data.savingsGoals?.length ?? 0,
     },
   };
 };

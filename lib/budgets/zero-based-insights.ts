@@ -100,7 +100,13 @@ const healthOf = (c: ZbbInsightCategory, today: ZbbInsightInput['today']): Categ
 
   // spending a goal down is the point of it, not a pace to warn about
   let runOutDay: number | null = null;
-  if (!c.isGoal && today && c.activityCents > 0 && c.availableCents > 0 && today.day < today.daysInMonth) {
+  if (
+    !c.isGoal &&
+    today &&
+    c.activityCents > 0 &&
+    c.availableCents > 0 &&
+    today.day < today.daysInMonth
+  ) {
     const perDay = c.activityCents / today.day;
     const day = Math.floor(today.day + c.availableCents / perDay);
     if (day < today.daysInMonth) runOutDay = Math.max(day, today.day);

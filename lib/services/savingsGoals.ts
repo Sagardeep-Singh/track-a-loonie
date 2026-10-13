@@ -149,7 +149,8 @@ const loadGoalActivity = async (
     for (const t of transfers) {
       const entry = activity.get(t.categoryId as string);
       const cents = toCents(t.amount);
-      if (entry) addTo(entry.contributions, monthOfDate(t.date), t.type === 'EXPENSE' ? cents : -cents);
+      if (entry)
+        addTo(entry.contributions, monthOfDate(t.date), t.type === 'EXPENSE' ? cents : -cents);
     }
   }
 
@@ -401,3 +402,25 @@ export const getGoalTargets = async (
 /** whether the category has a savings goal; a spending limit can't be added to it */
 export const categoryHasGoal = async (userId: string, categoryId: string): Promise<boolean> =>
   (await prisma.savingsGoal.count({ where: { userId, categoryId } })) > 0;
+
+/**
+ * Categories that already have a spending limit or a savings goal (archived
+ * included). Neither can take the other: a cap and a savings floor on one
+ * category would make both numbers meaningless.
+ */
+export const listLimitAndGoalCategoryIds = async (
+  userId: string,
+): Promise<{ limitCategoryIds: string[]; goalCategoryIds: string[] }> => {
+  const [budgets, goals] = await Promise.all([
+    prisma.budget.findMany({
+      where: { userId },
+      select: { categoryId: true },
+      distinct: ['categoryId'],
+    }),
+    prisma.savingsGoal.findMany({ where: { userId }, select: { categoryId: true } }),
+  ]);
+  return {
+    limitCategoryIds: budgets.map((b) => b.categoryId),
+    goalCategoryIds: goals.map((g) => g.categoryId),
+  };
+};

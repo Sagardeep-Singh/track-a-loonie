@@ -50,9 +50,7 @@ describe('savings goal validators', () => {
 
   it('rejects a malformed target month', () => {
     expect(updateSavingsGoalSchema.safeParse({ ...base, targetMonth: 2027 }).success).toBe(false);
-    expect(updateSavingsGoalSchema.safeParse({ ...base, targetMonth: 'soon' }).success).toBe(
-      false,
-    );
+    expect(updateSavingsGoalSchema.safeParse({ ...base, targetMonth: 'soon' }).success).toBe(false);
   });
 
   it('parses the list query', () => {

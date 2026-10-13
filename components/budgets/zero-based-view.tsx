@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRightLeft, Check, Target } from 'lucide-react';
+import { ArrowRightLeft, Check, PiggyBank, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
@@ -302,15 +302,27 @@ export const ZeroBasedView = ({
                         {Number(c.carriedIn) !== 0 && (
                           <span>{money(c.carriedIn)} carried in ·</span>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => openTarget(c)}
-                          className="hover:text-iris inline-flex items-center gap-1 whitespace-nowrap"
-                          aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
-                        >
-                          <Target size={12} />
-                          {c.target === null ? 'Set target' : `target ${money(c.target)}`}
-                        </button>
+                        {c.goal ? (
+                          // a goal's target is its monthly need; it's edited
+                          // from the Savings goals section, not as a limit
+                          <span
+                            className="inline-flex items-center gap-1 whitespace-nowrap"
+                            title={`Goal ${money(c.goal.targetAmount)} by ${monthLabel(c.goal.targetMonth)}`}
+                          >
+                            <PiggyBank size={12} />
+                            {money(c.target ?? 0)} needed this month
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => openTarget(c)}
+                            className="hover:text-iris inline-flex items-center gap-1 whitespace-nowrap"
+                            aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
+                          >
+                            <Target size={12} />
+                            {c.target === null ? 'Set target' : `target ${money(c.target)}`}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

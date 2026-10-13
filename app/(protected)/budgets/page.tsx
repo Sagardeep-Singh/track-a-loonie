@@ -2,9 +2,11 @@ import { getServerAuthSession } from '@/lib/auth/session';
 import { listBudgets } from '@/lib/services/budgets';
 import { listCategories } from '@/lib/services/categories';
 import { getUncategorizedMonthSummary } from '@/lib/services/categorize';
+import { listLimitAndGoalCategoryIds, listSavingsGoals } from '@/lib/services/savingsGoals';
 import { getBudgetSettings, getZbbMonth } from '@/lib/services/zeroBased';
 import { BudgetsView } from '@/components/budgets/budgets-view';
 import { ZeroBasedView } from '@/components/budgets/zero-based-view';
+import { SavingsGoalsSection } from '@/components/budgets/savings-goals-section';
 import { ScreenHeader } from '@/components/nav/screen-header';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { getStoredPeriod } from '@/lib/period-cookie';
@@ -36,31 +38,50 @@ const BudgetsPage = async ({
   );
 
   const settings = await getBudgetSettings(userId);
-  if (settings.mode === 'ZERO_BASED') {
+  const zeroBased = settings.mode === 'ZERO_BASED';
+  const [goals, categories, { limitCategoryIds, goalCategoryIds }] = await Promise.all([
+    listSavingsGoals(userId, month),
+    listCategories(userId),
+    listLimitAndGoalCategoryIds(userId),
+  ]);
+  const goalsSection = (
+    <SavingsGoalsSection
+      goals={goals}
+      categories={categories}
+      unavailableCategoryIds={[...limitCategoryIds, ...goalCategoryIds]}
+      month={month}
+      zeroBased={zeroBased}
+    />
+  );
+
+  if (zeroBased) {
     const zbbMonth = await getZbbMonth(userId, month);
     return (
       <div className="animate-[fade-up_0.3s_ease-out]">
         {header('Give every dollar a job. Leftovers roll over to next month.')}
         <ZeroBasedView key={month} initialMonth={zbbMonth} />
+        {goalsSection}
       </div>
     );
   }
 
-  const [budgets, categories, uncategorized] = await Promise.all([
+  const [budgets, uncategorized] = await Promise.all([
     listBudgets(userId, month),
-    listCategories(userId),
     getUncategorizedMonthSummary(userId, month),
   ]);
+  // a goal's category can't also take a spending limit
+  const withGoal = new Set(goalCategoryIds);
 
   return (
     <div className="animate-[fade-up_0.3s_ease-out]">
       {header('A monthly limit per category. Status follows the limit, not the calendar.')}
       <BudgetsView
         initialBudgets={budgets}
-        categories={categories}
+        categories={categories.filter((c) => !withGoal.has(c.id))}
         month={month}
         uncategorized={uncategorized}
       />
+      {goalsSection}
     </div>
   );
 };
