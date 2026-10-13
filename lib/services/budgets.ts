@@ -2,6 +2,7 @@ import { monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { ServiceValidationError } from '@/lib/services/common';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
+import { categoryHasGoal } from '@/lib/services/savingsGoals';
 import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 import type { CreateBudgetInput, UpdateBudgetInput } from '@/lib/validators/budgets';
 
@@ -118,6 +119,12 @@ export const createBudget = async (
   const category = await prisma.category.findFirst({ where: { id: input.categoryId, userId } });
   if (!category) {
     throw new ServiceValidationError('Category not found');
+  }
+  // a cap and a savings floor on one category would make both numbers meaningless
+  if (await categoryHasGoal(userId, input.categoryId)) {
+    throw new ServiceValidationError(
+      'This category has a savings goal. Remove the goal before adding a spending limit',
+    );
   }
 
   const existing = await prisma.budget.findFirst({
