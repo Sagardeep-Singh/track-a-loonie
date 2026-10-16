@@ -343,6 +343,7 @@ export const SavingsGoalsSection = ({
       : goals.every((g) => g.status === 'FUNDED')
         ? STATUS.FUNDED
         : STATUS.ON_TRACK;
+  const visibleGoals = zeroBased ? goals.filter((g) => g.id === draft?.goalId) : goals;
   const modeHint = zeroBased
     ? 'Assign to a goal’s category each month. Spending from that category later is covered by what you saved.'
     : 'Transfers to savings tagged with a goal’s category count as contributions. Spending tagged with it later is covered by what you saved.';
@@ -389,14 +390,71 @@ export const SavingsGoalsSection = ({
               style={{ width: `${Math.round(Math.min(totalFraction, 1) * 100)}%` }}
             />
           </div>
-          <div className="bg-line my-3.5 h-px" />
+          {zeroBased && (
+            <ul className="mt-4 flex flex-col">
+              {goals.map((goal) => (
+                <li
+                  key={goal.id}
+                  data-testid={`goal-${goal.categoryName}`}
+                  className="border-line flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t py-2.5 text-[13px]"
+                >
+                  <span className="min-w-0">
+                    <span className="font-medium">{goal.categoryName}</span>
+                    <span className="text-ink-muted font-mono text-[12px] tabular-nums">
+                      {' '}
+                      ${goal.saved} of ${goal.targetAmount} by {monthLabel(goal.targetMonth)}
+                    </span>
+                    <span className={cn('text-[12px]', STATUS[goal.status].tone)}>
+                      {' '}
+                      · {STATUS[goal.status].label}
+                    </span>
+                  </span>
+                  <span className="ml-auto flex shrink-0 items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(goal)}
+                      className="text-ink-muted hover:text-iris inline-flex items-center gap-1 text-xs"
+                      aria-label={`Edit ${goal.categoryName} goal`}
+                    >
+                      <Pencil size={14} />
+                      Edit
+                    </button>
+                    {goal.status === 'FUNDED' && (
+                      <button
+                        type="button"
+                        onClick={() => archive(goal)}
+                        className="text-ink-muted hover:text-iris inline-flex items-center gap-1 text-xs"
+                        aria-label={`Archive ${goal.categoryName} goal`}
+                      >
+                        <Archive size={14} />
+                        Archive
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(goal)}
+                      className="text-ink-muted hover:text-rose inline-flex items-center gap-1 text-xs"
+                      aria-label={`Remove ${goal.categoryName} goal`}
+                    >
+                      <Trash2 size={14} />
+                      Remove
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className={cn('bg-line h-px', zeroBased ? 'mb-3.5' : 'my-3.5')} />
           <p className="text-ink-muted text-[12.5px] leading-snug">{modeHint}</p>
         </div>
       )}
 
-      {goals.length > 0 && (
+      {/* In zero-based mode each goal is already a row in the budget table
+          (its ring, this month's need and the assign box), so cards would
+          repeat it; only the one being edited opens here. */}
+      {visibleGoals.length > 0 && (
         <div className="mt-4.5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {goals.map((goal, index) => {
+          {visibleGoals.map((goal, index) => {
             const status = STATUS[goal.status];
             const target = Number(goal.targetAmount);
             const saved = Number(goal.saved);
@@ -406,7 +464,7 @@ export const SavingsGoalsSection = ({
             return (
               <article
                 key={goal.id}
-                data-testid={`goal-${goal.categoryName}`}
+                data-testid={zeroBased ? undefined : `goal-${goal.categoryName}`}
                 style={{ '--i': index } as React.CSSProperties}
                 className={cn(
                   'stagger-item border-line bg-paper-raised relative rounded-2xl border p-4.5 transition-colors sm:p-5.5',

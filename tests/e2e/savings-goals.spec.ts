@@ -197,5 +197,12 @@ test('savings goal in zero-based mode: the monthly need is the target', async ({
 
   await page.getByRole('button', { name: 'Assign to targets' }).click();
   await expect(page.getByLabel('Assigned to Emergency fund')).toHaveValue('100.00');
-  await expect(page.getByTestId('goal-Emergency fund')).toContainText('$100.00 put aside');
+  await expect(page.getByTestId('goal-Emergency fund')).toContainText('$100.00 of $600.00');
+
+  // the goal is a table row here, not a card as well
+  await expect(page.getByRole('link', { name: 'Emergency fund' })).toHaveCount(0);
+
+  // the zero-based Overview shows category rings like limits mode
+  await page.goto('/dashboard');
+  await expect(page.getByText("share of each category's money spent")).toBeVisible();
 });

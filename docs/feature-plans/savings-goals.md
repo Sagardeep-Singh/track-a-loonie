@@ -304,3 +304,10 @@ validation error for a category with a limit.
 - A one-line goals summary sits at the top of the Budgets page in both modes and links to the
   goals section. Owner chose this over a separate nav item.
 - Goals use the `Goal` icon; `PiggyBank` is already the Budgets nav icon.
+- Goal cards follow the budget card layout (ring tinted by status, monthly amount headline,
+  saved of target, footer status and Edit / Remove) under a summary card like the budgets total.
+- Zero-based mode: goals appear only as budget table rows; the goals summary card lists them
+  with Edit / Remove instead of repeating them as cards.
+- Zero-based Overview now has the same category rings card as limits mode, filled from
+  category health (spent against carried in plus assigned). The Overview skeleton's hero no
+  longer draws a ring, since the zero-based hero is a Ready to Assign card.
