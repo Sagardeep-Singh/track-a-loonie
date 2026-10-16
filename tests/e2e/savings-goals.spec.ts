@@ -65,9 +65,10 @@ test('savings goal: create, contribute, spend from it, delete', async ({ page })
   await page.getByRole('button', { name: 'Add goal' }).click();
 
   const card = page.getByTestId('goal-Trip to Japan');
-  await expect(card).toContainText('Save $100.00 this month');
-  await expect(card).toContainText('$0.00 put aside so far');
-  await expect(card).toContainText('On track');
+  await expect(card).toContainText('$100.00 to save');
+  await expect(card).toContainText('$0.00 of $1200.00');
+  await expect(card).toContainText('$0.00 put aside, 12 months left');
+  await expect(page.getByText('All 1 goal')).toBeVisible();
 
   // a transfer out of chequing tagged with the goal's category is a contribution
   const goals = await (await page.request.get('/api/savings-goals')).json();
@@ -86,8 +87,8 @@ test('savings goal: create, contribute, spend from it, delete', async ({ page })
   expect(contribution.ok()).toBe(true);
 
   await page.reload();
-  await expect(card).toContainText('$150.00 of $1,200.00');
-  await expect(card).toContainText('$150.00 put aside so far');
+  await expect(card).toContainText('$150.00 of $1200.00');
+  await expect(card).toContainText('$150.00 put aside');
   await expect(page.getByTestId('savings-goals-shortcut')).toContainText(
     '1 savings goal · save $100.00 this month, $150.00 so far',
   );
@@ -96,7 +97,7 @@ test('savings goal: create, contribute, spend from it, delete', async ({ page })
   await card.getByRole('button', { name: 'Edit Trip to Japan goal' }).click();
   await card.getByLabel('Target amount').fill('2400');
   await card.getByRole('button', { name: 'Save goal' }).click();
-  await expect(card).toContainText('$150.00 of $2,400.00');
+  await expect(card).toContainText('$150.00 of $2400.00');
 
   // spending from the goal is covered by what was saved, not counted as spending
   const deposit = await page.request.post('/api/transactions', {
@@ -111,7 +112,7 @@ test('savings goal: create, contribute, spend from it, delete', async ({ page })
   });
   expect(deposit.ok()).toBe(true);
   await page.reload();
-  await expect(card).toContainText('Spent $120.00 from this goal · $30.00 left');
+  await expect(card).toContainText('spent $120.00');
 
   await page.goto('/dashboard');
   // the contribution counts as saved; the covered deposit isn't spending
@@ -121,8 +122,8 @@ test('savings goal: create, contribute, spend from it, delete', async ({ page })
 
   // deleting the goal keeps the category
   await page.goto('/budgets');
-  await card.getByRole('button', { name: 'Delete Trip to Japan goal' }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
+  await card.getByRole('button', { name: 'Remove Trip to Japan goal' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click();
   await expect(page.getByText('No savings goals yet.')).toBeVisible();
   const categories = await (await page.request.get('/api/categories')).json();
   expect(categories.some((c: { name: string }) => c.name === 'Trip to Japan')).toBe(true);
@@ -196,5 +197,5 @@ test('savings goal in zero-based mode: the monthly need is the target', async ({
 
   await page.getByRole('button', { name: 'Assign to targets' }).click();
   await expect(page.getByLabel('Assigned to Emergency fund')).toHaveValue('100.00');
-  await expect(page.getByTestId('goal-Emergency fund')).toContainText('$100.00 put aside so far');
+  await expect(page.getByTestId('goal-Emergency fund')).toContainText('$100.00 put aside');
 });

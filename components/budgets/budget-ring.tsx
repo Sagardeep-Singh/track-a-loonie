@@ -14,14 +14,24 @@ import { useReducedTransition } from '@/lib/motion/use-reduced-transition';
 export const BudgetRing = ({
   fraction,
   size = 84,
+  tone,
 }: {
   fraction: number;
   /** rendered px; the drawing scales from its 84px viewBox */
   size?: number;
+  /** fixed color instead of the spending-pace tiers; savings goals pass
+   * their status, since a full ring there is good news, not a blown limit */
+  tone?: 'sky' | 'iris' | 'rose';
 }): React.ReactElement => {
-  const over = fraction > 1;
+  const over = tone === undefined && fraction > 1;
   const near = fraction >= 0.85;
-  const color = over ? 'var(--rose)' : near ? 'var(--iris)' : 'var(--sky)';
+  const color = tone
+    ? `var(--${tone})`
+    : over
+      ? 'var(--rose)'
+      : near
+        ? 'var(--iris)'
+        : 'var(--sky)';
   const outerR = 36;
   const outerStroke = 8;
   const outerC = 2 * Math.PI * outerR;

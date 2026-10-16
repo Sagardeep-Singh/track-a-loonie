@@ -2,7 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Archive, Check, Pencil, Goal, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Archive, Check, Goal, Pencil, Trash2 } from 'lucide-react';
+import { AnimatedMoney } from '@/components/ui/animated-money';
+import { BudgetRing } from '@/components/budgets/budget-ring';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input, Select } from '@/components/ui/field';
@@ -11,23 +14,45 @@ import { deleteJSON, patchJSON, postJSON } from '@/lib/api-client';
 import type { GoalStatus } from '@/lib/budgets/savings-goal-math';
 import { cn } from '@/lib/cn';
 import { monthsBetween, shiftMonth } from '@/lib/date';
-import { monthLabel } from '@/lib/period-selection';
+import { monthLabel, monthToRange } from '@/lib/period-selection';
+import { transactionsHref } from '@/lib/transactions/transaction-filters';
 import type { FrontendCategory } from '@/lib/services/categories';
 import type { FrontendSavingsGoal } from '@/lib/services/savingsGoals';
 
 const MONEY = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const money = (value: string | number): string => MONEY.format(Number(value));
 
-const STATUS: Record<GoalStatus, { label: string; tone: string; dot: string }> = {
-  ON_TRACK: { label: 'On track', tone: 'text-sky', dot: 'bg-sky' },
-  FUNDED: { label: 'Funded', tone: 'text-sky', dot: 'bg-sky' },
-  BEHIND: { label: 'Behind', tone: 'text-iris', dot: 'bg-iris' },
-  OVERDUE: { label: 'Overdue', tone: 'text-rose', dot: 'bg-rose' },
-  NOT_STARTED: { label: 'Not started', tone: 'text-ink-muted', dot: 'bg-ink-muted' },
+type StatusStyle = { label: string; tone: string; dot: string; ring: 'sky' | 'iris' | 'rose' };
+
+// same tones as the budget cards: sky is fine, iris needs attention, rose is late
+const STATUS: Record<GoalStatus, StatusStyle> = {
+  ON_TRACK: { label: 'On track', tone: 'text-sky', dot: 'bg-sky', ring: 'sky' },
+  FUNDED: { label: 'Funded', tone: 'text-sky', dot: 'bg-sky', ring: 'sky' },
+  BEHIND: { label: 'Behind', tone: 'text-iris', dot: 'bg-iris', ring: 'iris' },
+  OVERDUE: { label: 'Overdue', tone: 'text-rose', dot: 'bg-rose', ring: 'rose' },
+  NOT_STARTED: { label: 'Not started', tone: 'text-ink-muted', dot: 'bg-ink-muted', ring: 'sky' },
 };
 
-/** how many upcoming months the schedule disclosure lists */
-const SCHEDULE_PREVIEW = 12;
+const MONTH_ONLY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'long' });
+const monthOnly = (month: number): string =>
+  MONTH_ONLY.format(new Date(Date.UTC(Math.floor(month / 100), (month % 100) - 1, 1)));
+
+/** the footer line, like a budget card's pace text */
+const paceText = (goal: FrontendSavingsGoal): string => {
+  const by = `by ${monthLabel(goal.targetMonth)}`;
+  switch (goal.status) {
+    case 'FUNDED':
+      return Number(goal.spent) > 0 ? `$${goal.balance} left to spend` : `Reached ${by}`;
+    case 'OVERDUE':
+      return `Was due ${monthLabel(goal.targetMonth)}`;
+    case 'NOT_STARTED':
+      return `Due ${by}`;
+    case 'BEHIND':
+      return `Behind, raised to catch up ${by}`;
+    default:
+      return `$${goal.contributedThisMonth} put aside, ${goal.monthsLeft} ${goal.monthsLeft === 1 ? 'month' : 'months'} left`;
+  }
+};
 
 type Draft = {
   goalId: string | null;
@@ -305,6 +330,23 @@ export const SavingsGoalsSection = ({
     router.refresh();
   };
 
+  const totalNeed = goals.reduce((sum, g) => sum + Number(g.needThisMonth), 0);
+  const totalContributed = goals.reduce(
+    (sum, g) => sum + Math.max(Number(g.contributedThisMonth), 0),
+    0,
+  );
+  const totalFraction = totalNeed > 0 ? totalContributed / totalNeed : 1;
+  const summaryStatus: StatusStyle = goals.some((g) => g.status === 'OVERDUE')
+    ? STATUS.OVERDUE
+    : goals.some((g) => g.status === 'BEHIND')
+      ? STATUS.BEHIND
+      : goals.every((g) => g.status === 'FUNDED')
+        ? STATUS.FUNDED
+        : STATUS.ON_TRACK;
+  const modeHint = zeroBased
+    ? 'Assign to a goal’s category each month. Spending from that category later is covered by what you saved.'
+    : 'Transfers to savings tagged with a goal’s category count as contributions. Spending tagged with it later is covered by what you saved.';
+
   return (
     <section
       id="savings-goals"
@@ -316,35 +358,66 @@ export const SavingsGoalsSection = ({
           Savings goals
         </h2>
       </div>
-      <p className="text-ink-muted mt-1.5 text-[12.5px] leading-snug">
-        {zeroBased
-          ? 'Assign to a goal’s category each month. Spending from that category later is covered by what you saved.'
-          : 'Transfers to savings tagged with a goal’s category count as contributions. Spending tagged with it later is covered by what you saved.'}
-      </p>
 
-      {goals.length === 0 ? (
-        <p className="text-ink-muted mt-4.5 text-sm">No savings goals yet.</p>
-      ) : (
+      {goals.length > 0 && (
+        <div className="border-line bg-paper-raised mt-4.5 rounded-[18px] border p-5.5">
+          <div className="flex items-baseline justify-between gap-2.5">
+            <span className="text-ink-muted text-[11px] tracking-[0.08em] uppercase">
+              All {goals.length} goal{goals.length === 1 ? '' : 's'} · {monthOnly(month)}
+            </span>
+            <span
+              className={cn(
+                'flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.04em] uppercase',
+                summaryStatus.tone,
+              )}
+            >
+              <span className={cn('size-1.5 rounded-full', summaryStatus.dot)} />
+              {summaryStatus.label}
+            </span>
+          </div>
+          <div className={cn('font-display mt-2 text-xl font-semibold', summaryStatus.tone)}>
+            {totalNeed > 0
+              ? `Save ${money(totalNeed)} this month`
+              : 'Nothing more to save this month'}
+          </div>
+          <div className="text-ink-muted mt-1.5 font-mono text-[13px] tabular-nums">
+            {money(totalContributed)} of {money(totalNeed)} put aside
+          </div>
+          <div className="bg-paper-sunk mt-3 flex h-1.75 overflow-hidden rounded-full">
+            <span
+              className={cn('block', summaryStatus.dot)}
+              style={{ width: `${Math.round(Math.min(totalFraction, 1) * 100)}%` }}
+            />
+          </div>
+          <div className="bg-line my-3.5 h-px" />
+          <p className="text-ink-muted text-[12.5px] leading-snug">{modeHint}</p>
+        </div>
+      )}
+
+      {goals.length > 0 && (
         <div className="mt-4.5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {goals.map((goal) => {
+          {goals.map((goal, index) => {
             const status = STATUS[goal.status];
             const target = Number(goal.targetAmount);
             const saved = Number(goal.saved);
-            const fraction = target > 0 ? Math.min(Math.max(saved / target, 0), 1) : 0;
             const need = Number(goal.needThisMonth);
             const spent = Number(goal.spent);
+            const editing = draft?.goalId === goal.id;
             return (
               <article
                 key={goal.id}
                 data-testid={`goal-${goal.categoryName}`}
-                className="border-line bg-paper-raised rounded-2xl border p-4.5 sm:p-5.5"
+                style={{ '--i': index } as React.CSSProperties}
+                className={cn(
+                  'stagger-item border-line bg-paper-raised relative rounded-2xl border p-4.5 transition-colors sm:p-5.5',
+                  editing ? 'border-iris' : 'hover:border-iris flex items-center gap-4 sm:gap-5.5',
+                )}
               >
-                {draft?.goalId === goal.id ? (
+                {editing ? (
                   <>
-                    <h3 className="font-display mb-3 flex min-w-0 items-center gap-1.5 text-base font-semibold">
-                      <Goal size={16} className="text-iris shrink-0" />
-                      <span className="truncate">Edit {goal.categoryName}</span>
-                    </h3>
+                    <div className="font-display mb-3 text-base font-semibold">
+                      Edit {goal.categoryName}
+                    </div>
                     <GoalForm
                       draft={draft}
                       onChange={setDraft}
@@ -359,113 +432,72 @@ export const SavingsGoalsSection = ({
                   </>
                 ) : (
                   <>
-                    <div className="flex items-baseline justify-between gap-2.5">
-                      <h3 className="font-display flex min-w-0 items-center gap-1.5 text-base font-semibold">
-                        <Goal size={16} className="text-iris shrink-0" />
-                        <span className="truncate">{goal.categoryName}</span>
-                      </h3>
-                      <span
-                        className={cn(
-                          'flex shrink-0 items-center gap-1.5 text-[11px] font-semibold tracking-[0.04em] uppercase',
-                          status.tone,
-                        )}
+                    <BudgetRing
+                      fraction={target > 0 ? Math.max(saved / target, 0) : 0}
+                      tone={status.ring}
+                    />
+                    <div className="min-w-0 flex-1">
+                      {/* Stretched link, same as the budget cards: a click
+                          anywhere opens the goal category's transactions. The
+                          controls sit above it (relative z-10). */}
+                      <Link
+                        href={transactionsHref({
+                          ...monthToRange(month),
+                          categoryIds: [goal.categoryId],
+                        })}
+                        className="font-display block text-base font-semibold after:absolute after:inset-0 after:rounded-2xl"
                       >
-                        <span className={cn('size-1.5 rounded-full', status.dot)} />
-                        {status.label}
-                      </span>
-                    </div>
-                    <div className="text-ink-muted mt-1.5 font-mono text-[13px] tabular-nums">
-                      {money(goal.saved)} of {money(goal.targetAmount)} by{' '}
-                      {monthLabel(goal.targetMonth)}
-                    </div>
-                    <div
-                      className="bg-paper-sunk mt-2.5 flex h-1.75 overflow-hidden rounded-full"
-                      role="progressbar"
-                      aria-label={`${goal.categoryName} progress`}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={Math.round(fraction * 100)}
-                    >
-                      <span
-                        className={cn('block', status.dot)}
-                        style={{ width: `${Math.round(fraction * 100)}%` }}
-                      />
-                    </div>
-                    {need > 0 ? (
-                      <div className="mt-3">
-                        <div className={cn('font-display text-lg font-semibold', status.tone)}>
-                          Save {money(need)} this month
-                        </div>
-                        <div className="text-ink-muted mt-0.5 text-xs">
-                          {money(goal.contributedThisMonth)} put aside so far
-                          {goal.monthsLeft > 1 ? ` · ${goal.monthsLeft} months left` : ''}
-                          {goal.status === 'BEHIND' && ' · raised to catch up'}
-                        </div>
+                        {goal.categoryName}
+                      </Link>
+                      <div className={cn('font-display mt-1 text-lg font-semibold', status.tone)}>
+                        {need > 0 ? (
+                          <>
+                            <AnimatedMoney value={need} /> to save
+                          </>
+                        ) : goal.status === 'NOT_STARTED' ? (
+                          `Starts ${monthLabel(goal.startMonth)}`
+                        ) : (
+                          'Funded'
+                        )}
                       </div>
-                    ) : goal.status === 'NOT_STARTED' ? (
-                      <p className="text-ink-muted mt-3 text-xs">
-                        Starts {monthLabel(goal.startMonth)}.
-                      </p>
-                    ) : (
-                      <p className="text-sky font-display mt-3 text-lg font-semibold">
-                        Nothing more to save
-                      </p>
-                    )}
-                    {spent > 0 && (
-                      <p className="text-ink-muted mt-2 text-xs">
-                        Spent {money(goal.spent)} from this goal · {money(goal.balance)} left
-                      </p>
-                    )}
-                    {goal.schedule.length > 1 && (
-                      <details className="mt-2.5">
-                        <summary className="text-ink-muted hover:text-iris cursor-pointer text-xs">
-                          Monthly plan
-                        </summary>
-                        <ul className="text-ink-muted mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[12px] tabular-nums">
-                          {goal.schedule.slice(0, SCHEDULE_PREVIEW).map((share) => (
-                            <li key={share.month} className="flex justify-between gap-2">
-                              <span>{monthLabel(share.month)}</span>
-                              <span>{money(share.amount)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                        {goal.schedule.length > SCHEDULE_PREVIEW && (
-                          <p className="text-ink-muted mt-1 text-[11px]">
-                            and {goal.schedule.length - SCHEDULE_PREVIEW} more months
-                          </p>
-                        )}
-                      </details>
-                    )}
-                    <div className="mt-3 flex items-center justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(goal)}
-                        className="text-ink-muted hover:text-iris inline-flex items-center gap-1 text-xs"
-                        aria-label={`Edit ${goal.categoryName} goal`}
-                      >
-                        <Pencil size={14} />
-                        Edit
-                      </button>
-                      {goal.status === 'FUNDED' && (
-                        <button
-                          type="button"
-                          onClick={() => archive(goal)}
-                          className="text-ink-muted hover:text-iris inline-flex items-center gap-1 text-xs"
-                          aria-label={`Archive ${goal.categoryName} goal`}
-                        >
-                          <Archive size={14} />
-                          Archive
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDelete(goal)}
-                        className="text-ink-muted hover:text-rose inline-flex items-center gap-1 text-xs"
-                        aria-label={`Delete ${goal.categoryName} goal`}
-                      >
-                        <Trash2 size={14} />
-                        Delete
-                      </button>
+                      <div className="text-ink-muted mt-1 font-mono text-[12.5px] tabular-nums">
+                        ${saved.toFixed(2)} of ${target.toFixed(2)}
+                        {spent > 0 && ` · spent $${spent.toFixed(2)}`}
+                      </div>
+                      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                        <span className="text-ink-muted min-w-0 text-xs">{paceText(goal)}</span>
+                        <span className="relative z-10 ml-auto flex shrink-0 items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(goal)}
+                            className="text-ink-muted hover:text-iris inline-flex items-center gap-1 text-xs"
+                            aria-label={`Edit ${goal.categoryName} goal`}
+                          >
+                            <Pencil size={14} />
+                            Edit
+                          </button>
+                          {goal.status === 'FUNDED' && (
+                            <button
+                              type="button"
+                              onClick={() => archive(goal)}
+                              className="text-ink-muted hover:text-iris inline-flex items-center gap-1 text-xs"
+                              aria-label={`Archive ${goal.categoryName} goal`}
+                            >
+                              <Archive size={14} />
+                              Archive
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDelete(goal)}
+                            className="text-ink-muted hover:text-rose inline-flex items-center gap-1 text-xs"
+                            aria-label={`Remove ${goal.categoryName} goal`}
+                          >
+                            <Trash2 size={14} />
+                            Remove
+                          </button>
+                        </span>
+                      </div>
                     </div>
                   </>
                 )}
@@ -474,6 +506,8 @@ export const SavingsGoalsSection = ({
           })}
         </div>
       )}
+
+      {goals.length === 0 && <p className="text-ink-muted mt-4.5 text-sm">No savings goals yet.</p>}
 
       <div className="border-line bg-iris-soft mt-3 rounded-[18px] border border-dashed p-4">
         {draft !== null && draft.goalId === null ? (
@@ -508,13 +542,13 @@ export const SavingsGoalsSection = ({
 
       <ConfirmDialog
         open={confirmDelete !== null}
-        title="Delete savings goal"
+        title="Remove savings goal"
         description={
           confirmDelete
-            ? `Deletes the ${confirmDelete.categoryName} goal. The category and its transactions stay, and spending in it counts as normal spending again.`
+            ? `Removes the ${confirmDelete.categoryName} goal. The category and its transactions stay, and spending in it counts as normal spending again.`
             : ''
         }
-        confirmLabel="Delete"
+        confirmLabel="Remove"
         pending={deletePending}
         onConfirm={() => confirmDelete && remove(confirmDelete)}
         onCancel={() => setConfirmDelete(null)}
