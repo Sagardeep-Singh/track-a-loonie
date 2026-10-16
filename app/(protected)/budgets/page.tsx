@@ -6,6 +6,7 @@ import { listLimitAndGoalCategoryIds, listSavingsGoals } from '@/lib/services/sa
 import { getBudgetSettings, getZbbMonth } from '@/lib/services/zeroBased';
 import { BudgetsView } from '@/components/budgets/budgets-view';
 import { ZeroBasedView } from '@/components/budgets/zero-based-view';
+import { BudgetModeCookieSync } from '@/components/budgets/budget-mode-cookie-sync';
 import {
   SavingsGoalsSection,
   SavingsGoalsShortcut,
@@ -64,6 +65,7 @@ const BudgetsPage = async ({
     const zbbMonth = await getZbbMonth(userId, month);
     return (
       <div className="animate-[fade-up_0.3s_ease-out]">
+        <BudgetModeCookieSync mode="ZERO_BASED" />
         {header('Give every dollar a job. Leftovers roll over to next month.')}
         <SavingsGoalsShortcut goals={goals} />
         {/* keyed by the goals too: adding or changing one changes rows and targets */}
@@ -82,6 +84,7 @@ const BudgetsPage = async ({
 
   return (
     <div className="animate-[fade-up_0.3s_ease-out]">
+      <BudgetModeCookieSync mode="LIMITS" />
       {header('A monthly limit per category. Status follows the limit, not the calendar.')}
       <SavingsGoalsShortcut goals={goals} />
       <BudgetsView

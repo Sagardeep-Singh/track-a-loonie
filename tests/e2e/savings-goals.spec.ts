@@ -202,7 +202,7 @@ test('savings goal in zero-based mode: the monthly need is the target', async ({
   // the goal is a table row here, not a card as well
   await expect(page.getByRole('link', { name: 'Emergency fund' })).toHaveCount(0);
 
-  // the zero-based Overview shows category rings like limits mode
+  // the zero-based Overview shows categories as rings, the goal among them
   await page.goto('/dashboard');
-  await expect(page.getByText("share of each category's money spent")).toBeVisible();
+  await expect(page.getByTestId('zbb-ring-Emergency fund')).toBeVisible();
 });

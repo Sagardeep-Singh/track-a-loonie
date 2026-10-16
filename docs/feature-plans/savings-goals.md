@@ -308,6 +308,9 @@ validation error for a category with a limit.
   saved of target, footer status and Edit / Remove) under a summary card like the budgets total.
 - Zero-based mode: goals appear only as budget table rows; the goals summary card lists them
   with Edit / Remove instead of repeating them as cards.
-- Zero-based Overview now has the same category rings card as limits mode, filled from
-  category health (spent against carried in plus assigned). The Overview skeleton's hero no
-  longer draws a ring, since the zero-based hero is a Ready to Assign card.
+- Zero-based Overview (desktop) shows a "Categories" rings card, up to eight categories with
+  their health status, in place of the limits mode "Budgets" rings and the category list.
+  Rings only turn red when overspent. Mobile keeps the category bar list.
+- Loading skeletons for the Overview and Budgets match the active mode. Skeletons are
+  prefetched and render before any data, so the mode is mirrored into a `tal_budget_mode`
+  cookie (display hint only) by the Overview, Budgets and the Settings mode switch.

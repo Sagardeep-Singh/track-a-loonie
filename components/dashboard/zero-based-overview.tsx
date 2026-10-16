@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
+import { Ring } from '@/components/ui/ring';
 import {
   overviewCategoryHref,
   overviewExpenseHref,
   overviewIncomeHref,
 } from '@/lib/dashboard/drilldown';
+import { zbbBudgetRings } from '@/lib/dashboard/zbb-rings';
 import { cn } from '@/lib/cn';
 import type { CategoryHealth, InsightTone, Suggestion } from '@/lib/budgets/zero-based-insights';
 import type { FrontendZbbOverview } from '@/lib/services/zeroBased';
@@ -250,6 +252,76 @@ const STATUS_PILL: Record<CategoryHealth['status'], string> = {
 };
 
 const HEALTH_ROWS = 6;
+
+/**
+ * Desktop: the zero-based categories as rings, in place of the limits mode
+ * "Budgets" rings. Each ring is spending against what the category had this
+ * month, with its health status underneath. Mobile keeps `ZbbHealthCard`'s
+ * bars, the same way limits mode shows bars on mobile.
+ */
+export const ZbbCategoryRingsCard = ({
+  data,
+  monthShortLabel,
+}: {
+  data: FrontendZbbOverview;
+  monthShortLabel: string;
+}): React.ReactElement => {
+  const rings = zbbBudgetRings(data.health);
+  return (
+    <div className={card} data-testid="zbb-category-rings">
+      <div className="mb-4.5 flex items-baseline justify-between gap-2.5">
+        <h2 className="font-display text-base font-semibold">Categories</h2>
+        <Link href={`/budgets?month=${data.month}`} className="text-iris text-[12px] font-medium">
+          {data.health.length > rings.length ? `See all ${data.health.length}` : 'Open budget'}
+        </Link>
+      </div>
+      {rings.length === 0 ? (
+        <p className="text-ink-muted text-sm">
+          Nothing assigned yet this month.{' '}
+          <Link href={`/budgets?month=${data.month}`} className="text-iris font-medium">
+            Start assigning
+          </Link>
+          .
+        </p>
+      ) : (
+        <div className="grid grid-cols-4 gap-x-2.5 gap-y-4">
+          {rings.map((r, index) => (
+            <Link
+              key={r.id}
+              data-testid={`zbb-ring-${r.categoryName}`}
+              style={{ '--i': index } as React.CSSProperties}
+              href={overviewCategoryHref(data.month, [r.categoryId])}
+              className="stagger-item hover:bg-paper flex flex-col items-center gap-2.5 rounded-xl py-1.5"
+            >
+              {/* red only when overspent: spending all of what was assigned is the plan */}
+              <Ring size="category" fraction={r.fraction} alertAt={r.over ? 0 : 1}>
+                <span className="font-mono text-sm">{r.pctLabel}</span>
+              </Ring>
+              <div className="text-center text-[12.5px] leading-tight">
+                {r.categoryName}
+                <br />
+                <span className={cn('font-mono text-xs', r.over ? 'text-rose' : 'text-ink-muted')}>
+                  {moneyCents(Math.round(Number(r.left.replace('Over by ', '')) * 100))}
+                  {r.over ? ' over' : ' left'}
+                </span>
+              </div>
+              <span
+                className={cn(
+                  'rounded-full px-2 py-px text-[10.5px] font-semibold',
+                  STATUS_PILL[r.status],
+                )}
+              >
+                {r.status === 'at-risk' && r.runOutDay !== null
+                  ? `Empty ~${monthShortLabel} ${r.runOutDay}`
+                  : STATUS_LABEL[r.status]}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const ZbbHealthCard = ({
   data,

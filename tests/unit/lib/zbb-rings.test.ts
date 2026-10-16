@@ -29,6 +29,9 @@ describe('zbbBudgetRings', () => {
       pctLabel: '70%',
       left: '180.00',
       over: false,
+      status: 'funded',
+      runOutDay: null,
+      targetShortfallCents: 0,
     });
   });
 
@@ -51,10 +54,11 @@ describe('zbbBudgetRings', () => {
     expect(idle.fraction).toBe(0);
   });
 
-  it('shows at most four, in the order given', () => {
+  it('shows at most eight, in the order given', () => {
+    const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
     const rings = zbbBudgetRings(
-      ['A', 'B', 'C', 'D', 'E'].map((n) => health(n, { funded: 100, activity: 0, available: 100 })),
+      names.map((n) => health(n, { funded: 100, activity: 0, available: 100 })),
     );
-    expect(rings.map((r) => r.categoryName)).toEqual(['A', 'B', 'C', 'D']);
+    expect(rings.map((r) => r.categoryName)).toEqual(names.slice(0, 8));
   });
 });

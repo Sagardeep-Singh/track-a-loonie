@@ -5,7 +5,7 @@ import { getOverviewData, type OverviewDayBar } from '@/lib/services/overview';
 import { ScreenHeader } from '@/components/nav/screen-header';
 import { AnimatedMoney } from '@/components/ui/animated-money';
 import { Ring } from '@/components/ui/ring';
-import { zbbBudgetRings } from '@/lib/dashboard/zbb-rings';
+import { BudgetModeCookieSync } from '@/components/budgets/budget-mode-cookie-sync';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { ExpensePie } from '@/components/dashboard/expense-pie';
 import { DayPanel } from '@/components/dashboard/day-panel';
@@ -22,6 +22,7 @@ import { getStoredPeriod } from '@/lib/period-cookie';
 import { getBudgetSettings, getZbbOverview } from '@/lib/services/zeroBased';
 import {
   ZbbAllocationCard,
+  ZbbCategoryRingsCard,
   ZbbHealthCard,
   ZbbHeroCard,
   ZbbSuggestionsCard,
@@ -65,9 +66,9 @@ const DashboardPage = async ({
     }),
     getBudgetSettings(userId),
   ]);
-  // zero-based mode swaps the limits hero for its own cards and fills the
-  // budget rings from category health; months before zero-based started fall
-  // back to the limits layout
+  // zero-based mode swaps the limits hero and budget rings for its own cards
+  // (category rings on desktop); months before zero-based started fall back
+  // to the limits layout
   const zbb =
     budgetSettings.mode === 'ZERO_BASED' &&
     budgetSettings.zbbStartMonth !== null &&
@@ -79,7 +80,7 @@ const DashboardPage = async ({
   );
   const {
     hero,
-    budgetRings: limitRings,
+    budgetRings,
     expenseBreakdown,
     dayBars,
     selectedDay,
@@ -87,10 +88,6 @@ const DashboardPage = async ({
     cycleCard,
     dailyPace,
   } = data;
-
-  // both modes share the rings card: limits by share of each limit used,
-  // zero-based by share of what each category had this month
-  const budgetRings = zbb ? zbbBudgetRings(zbb.health) : limitRings;
 
   const dayHref = (d: number): string =>
     month ? `/dashboard?month=${month}&day=${d}` : `/dashboard?day=${d}`;
@@ -164,15 +161,13 @@ const DashboardPage = async ({
     <div className="border-line bg-paper-raised rounded-[18px] border p-5.5">
       <div className="mb-4.5 flex items-baseline justify-between">
         <h2 className="font-display text-base font-semibold">Budgets</h2>
-        <span className="text-ink-muted text-xs">
-          {zbb ? "share of each category's money spent" : 'share of each limit used'}
-        </span>
+        <span className="text-ink-muted text-xs">share of each limit used</span>
       </div>
       {budgetRings.length === 0 ? (
         <p className="text-ink-muted text-sm">
-          {zbb ? 'Nothing assigned or spent yet.' : 'No budgets set for this month yet.'}{' '}
+          No budgets set for this month yet.{' '}
           <Link href="/budgets" className="text-iris font-medium">
-            {zbb ? 'Assign money' : 'Set one'}
+            Set one
           </Link>
           .
         </p>
@@ -256,6 +251,7 @@ const DashboardPage = async ({
 
   return (
     <div className="animate-[fade-up_0.3s_ease-out] pb-20 lg:pb-0">
+      <BudgetModeCookieSync mode={budgetSettings.mode} />
       <div className={dayFocus ? 'hidden lg:block' : undefined}>
         <ScreenHeader
           title="Overview"
@@ -316,9 +312,8 @@ const DashboardPage = async ({
               {zbb ? (
                 <>
                   <ZbbHeroCard data={zbb} />
-                  {ringsCard}
+                  <ZbbCategoryRingsCard data={zbb} monthShortLabel={zbbMonthShort} />
                   <ZbbSuggestionsCard data={zbb} />
-                  <ZbbHealthCard data={zbb} monthShortLabel={zbbMonthShort} />
                 </>
               ) : (
                 <>
@@ -615,7 +610,6 @@ const DashboardPage = async ({
 
             {zbb ? (
               <>
-                {ringBars}
                 <ZbbAllocationCard data={zbb} />
                 <ZbbHealthCard data={zbb} monthShortLabel={zbbMonthShort} />
               </>
