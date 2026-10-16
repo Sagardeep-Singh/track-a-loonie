@@ -292,3 +292,15 @@ validation error for a category with a limit.
   (contributions are transfers, covered spending isn't an expense) showed as empty.
 - Known gap: the Overview "Net" drilldown on Transactions still lists income minus spending,
   so it doesn't subtract saved money the way the hero's net does.
+
+## Follow-up: form and discoverability
+
+- The goal form is inline like "Add a budget" (dashed card at the end of the section, editing
+  in place on the card), not a dialog.
+- "Reach it by" uses a shared `components/ui/month-picker.tsx` (year stepper and 12-month
+  grid, same look as the period picker) because `<input type="month">` has no picker in
+  Firefox or desktop Safari. Months before the current one and past the 10-year cap are
+  disabled.
+- A one-line goals summary sits at the top of the Budgets page in both modes and links to the
+  goals section. Owner chose this over a separate nav item.
+- Goals use the `Goal` icon; `PiggyBank` is already the Budgets nav icon.

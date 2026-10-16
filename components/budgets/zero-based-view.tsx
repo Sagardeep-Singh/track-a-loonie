@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRightLeft, Check, PiggyBank, Target } from 'lucide-react';
+import { ArrowRightLeft, Check, Goal, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
@@ -317,7 +317,7 @@ export const ZeroBasedView = ({
                             className="inline-flex items-center gap-1 whitespace-nowrap"
                             title={`Goal ${money(c.goal.targetAmount)} by ${monthLabel(c.goal.targetMonth)}`}
                           >
-                            <PiggyBank size={12} />
+                            <Goal size={12} />
                             {money(c.target ?? 0)} needed this month
                           </span>
                         ) : (

@@ -6,7 +6,10 @@ import { listLimitAndGoalCategoryIds, listSavingsGoals } from '@/lib/services/sa
 import { getBudgetSettings, getZbbMonth } from '@/lib/services/zeroBased';
 import { BudgetsView } from '@/components/budgets/budgets-view';
 import { ZeroBasedView } from '@/components/budgets/zero-based-view';
-import { SavingsGoalsSection } from '@/components/budgets/savings-goals-section';
+import {
+  SavingsGoalsSection,
+  SavingsGoalsShortcut,
+} from '@/components/budgets/savings-goals-section';
 import { ScreenHeader } from '@/components/nav/screen-header';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { getStoredPeriod } from '@/lib/period-cookie';
@@ -62,6 +65,7 @@ const BudgetsPage = async ({
     return (
       <div className="animate-[fade-up_0.3s_ease-out]">
         {header('Give every dollar a job. Leftovers roll over to next month.')}
+        <SavingsGoalsShortcut goals={goals} />
         {/* keyed by the goals too: adding or changing one changes rows and targets */}
         <ZeroBasedView key={`${month}:${goalsKey}`} initialMonth={zbbMonth} />
         {goalsSection}
@@ -79,6 +83,7 @@ const BudgetsPage = async ({
   return (
     <div className="animate-[fade-up_0.3s_ease-out]">
       {header('A monthly limit per category. Status follows the limit, not the calendar.')}
+      <SavingsGoalsShortcut goals={goals} />
       <BudgetsView
         initialBudgets={budgets}
         categories={categories.filter((c) => !withGoal.has(c.id))}

@@ -7,11 +7,21 @@ import { signUpThenSignIn } from './fixtures/auth';
  */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-/** `YYYY-MM` for the month `offset` months from now, as a month input takes it */
-const monthInput = (offset: number): string => {
+const MONTH_NAME = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'UTC',
+  month: 'long',
+  year: 'numeric',
+});
+
+/** picks the month `offset` months from now in the goal form's month picker */
+const pickMonth = async (page: Page, offset: number): Promise<void> => {
   const now = new Date();
   const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+  const picker = page.getByRole('group', { name: 'Reach it by' });
+  for (let year = now.getUTCFullYear(); year < date.getUTCFullYear(); year += 1) {
+    await picker.getByRole('button', { name: 'Next year' }).click();
+  }
+  await picker.getByRole('button', { name: MONTH_NAME.format(date), exact: true }).click();
 };
 
 const freshUser = async (page: Page): Promise<void> => {
@@ -35,11 +45,24 @@ test('savings goal: create, contribute, spend from it, delete', async ({ page })
   await expect(page.getByText('No savings goals yet.')).toBeVisible();
 
   // $1,200 over 12 months (this month plus 11) is $100 a month
-  await page.getByRole('button', { name: 'Add goal' }).click();
+  await expect(page.getByTestId('savings-goals-shortcut')).toContainText('Set a savings goal');
+  await page.getByRole('button', { name: 'New goal' }).click();
   await page.getByLabel('New category name').fill('Trip to Japan');
   await page.getByLabel('Target amount').fill('1200');
-  await page.getByLabel('Reach it by').fill(monthInput(11));
-  await page.getByRole('dialog').getByRole('button', { name: 'Add goal' }).click();
+  // months before this one can't be picked
+  const lastMonth = new Date();
+  lastMonth.setUTCDate(1);
+  lastMonth.setUTCMonth(lastMonth.getUTCMonth() - 1);
+  if (lastMonth.getUTCFullYear() === new Date().getUTCFullYear()) {
+    await expect(
+      page
+        .getByRole('group', { name: 'Reach it by' })
+        .getByRole('button', { name: MONTH_NAME.format(lastMonth), exact: true }),
+    ).toBeDisabled();
+  }
+  await pickMonth(page, 11);
+  await expect(page.getByText('About $100.00 a month for 12 months')).toBeVisible();
+  await page.getByRole('button', { name: 'Add goal' }).click();
 
   const card = page.getByTestId('goal-Trip to Japan');
   await expect(card).toContainText('Save $100.00 this month');
@@ -65,6 +88,15 @@ test('savings goal: create, contribute, spend from it, delete', async ({ page })
   await page.reload();
   await expect(card).toContainText('$150.00 of $1,200.00');
   await expect(card).toContainText('$150.00 put aside so far');
+  await expect(page.getByTestId('savings-goals-shortcut')).toContainText(
+    '1 savings goal · save $100.00 this month, $150.00 so far',
+  );
+
+  // editing happens in place on the card
+  await card.getByRole('button', { name: 'Edit Trip to Japan goal' }).click();
+  await card.getByLabel('Target amount').fill('2400');
+  await card.getByRole('button', { name: 'Save goal' }).click();
+  await expect(card).toContainText('$150.00 of $2,400.00');
 
   // spending from the goal is covered by what was saved, not counted as spending
   const deposit = await page.request.post('/api/transactions', {
@@ -115,7 +147,7 @@ test('savings goal: a category takes a goal or a spending limit, not both', asyn
 
   // the picker doesn't offer a category that has a limit
   await page.goto('/budgets');
-  await page.getByRole('button', { name: 'Add goal' }).click();
+  await page.getByRole('button', { name: 'New goal' }).click();
   await expect(page.getByLabel('Category').locator('option', { hasText: 'Groceries' })).toHaveCount(
     0,
   );
@@ -150,12 +182,12 @@ test('savings goal in zero-based mode: the monthly need is the target', async ({
   expect(modeSet.ok()).toBe(true);
 
   await page.goto('/budgets');
-  await page.getByRole('button', { name: 'Add goal' }).click();
+  await page.getByRole('button', { name: 'New goal' }).click();
   await page.getByLabel('New category name').fill('Emergency fund');
   await page.getByLabel('Target amount').fill('600');
-  await page.getByLabel('Reach it by').fill(monthInput(5));
+  await pickMonth(page, 5);
   await expect(page.getByLabel('Already saved in off-budget accounts')).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'Add goal' }).click();
+  await page.getByRole('button', { name: 'Add goal' }).click();
 
   // $600 over 6 months: the row shows this month's need instead of a limit target
   const row = page.getByTestId('zbb-row-Emergency fund');
