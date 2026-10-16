@@ -1,4 +1,9 @@
-import { computeZbbMonth, targetTopUps, type ZbbCell } from '@/lib/budgets/zero-based-math';
+import {
+  computeZbbMonth,
+  READY_TO_ASSIGN,
+  targetTopUps,
+  type ZbbCell,
+} from '@/lib/budgets/zero-based-math';
 import {
   buildZbbInsights,
   type AllocationSlice,
@@ -344,22 +349,34 @@ export const setAssignment = async (
   return getZbbMonth(userId, input.month);
 };
 
-/** moves money between two categories within one month, atomically */
+/**
+ * Moves money between two categories within one month, atomically. Either
+ * side can be Ready to Assign, which has no cell of its own: moving there just
+ * lowers the category's assignment (negative if it was funded in an earlier
+ * month), and Ready to Assign picks up the difference.
+ */
 export const moveMoney = async (
   userId: string,
   input: MoveMoneyInput,
 ): Promise<FrontendZbbMonth> => {
   const startMonth = await requireZeroBased(userId);
   assertWritableMonth(input.month, startMonth);
-  await assertOwnCategories(userId, [input.fromCategoryId, input.toCategoryId]);
+  const sides = [
+    { categoryId: input.fromCategoryId, sign: -1 },
+    { categoryId: input.toCategoryId, sign: 1 },
+  ].filter((side) => side.categoryId !== READY_TO_ASSIGN);
+  await assertOwnCategories(
+    userId,
+    sides.map((side) => side.categoryId),
+  );
   const cents = toCents(input.amount);
   await prisma.$transaction(async (tx) => {
-    const [from, to] = await Promise.all([
-      cellCents(tx, userId, input.fromCategoryId, input.month),
-      cellCents(tx, userId, input.toCategoryId, input.month),
-    ]);
-    await writeCell(tx, userId, input.fromCategoryId, input.month, from - cents);
-    await writeCell(tx, userId, input.toCategoryId, input.month, to + cents);
+    const current = await Promise.all(
+      sides.map((side) => cellCents(tx, userId, side.categoryId, input.month)),
+    );
+    for (const [i, side] of sides.entries()) {
+      await writeCell(tx, userId, side.categoryId, input.month, current[i] + side.sign * cents);
+    }
   });
   return getZbbMonth(userId, input.month);
 };

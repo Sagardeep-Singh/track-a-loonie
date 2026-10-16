@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { BudgetRing } from '@/components/budgets/budget-ring';
+import { READY_TO_ASSIGN } from '@/lib/budgets/zero-based-math';
 import { deleteJSON, getJSON, patchJSON, postJSON, putJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { monthLabel } from '@/lib/period-selection';
@@ -123,14 +124,15 @@ export const ZeroBasedView = ({
 
   const openMove = (category: FrontendZbbCategory): void => {
     const overspent = Number(category.available) < 0;
-    // "Cover" pulls money into an overspent row; "Move" pushes money out
+    // "Cover" pulls money into an overspent row from a funded one; "Move"
+    // pushes money out, back to Ready to Assign unless another row is picked
     const other = categories.find(
-      (c) => c.categoryId !== category.categoryId && (!overspent || Number(c.available) > 0),
+      (c) => c.categoryId !== category.categoryId && Number(c.available) > 0,
     );
     setMoveError(null);
     setMove({
       fromCategoryId: overspent ? (other?.categoryId ?? '') : category.categoryId,
-      toCategoryId: overspent ? category.categoryId : (other?.categoryId ?? ''),
+      toCategoryId: overspent ? category.categoryId : READY_TO_ASSIGN,
       amount: overspent ? Math.abs(Number(category.available)).toFixed(2) : '',
     });
   };
@@ -471,6 +473,7 @@ export const ZeroBasedView = ({
                 <option value="" disabled>
                   Pick a category
                 </option>
+                <option value={READY_TO_ASSIGN}>Ready to Assign ({money(ready)})</option>
                 {categories.map((c) => (
                   <option key={c.categoryId} value={c.categoryId}>
                     {c.categoryName} ({money(c.available)})
@@ -489,6 +492,7 @@ export const ZeroBasedView = ({
                 <option value="" disabled>
                   Pick a category
                 </option>
+                <option value={READY_TO_ASSIGN}>Ready to Assign ({money(ready)})</option>
                 {categories.map((c) => (
                   <option key={c.categoryId} value={c.categoryId}>
                     {c.categoryName} ({money(c.available)})
