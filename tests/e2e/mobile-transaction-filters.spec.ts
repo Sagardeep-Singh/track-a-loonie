@@ -96,3 +96,26 @@ test('the Spending / Income pills write the same type filter the dialog shows', 
   await pills.getByRole('button', { name: 'All', exact: true }).click();
   await expect(page).not.toHaveURL(/type=/);
 });
+
+test('the category picker works at phone width without horizontal overflow', async ({ page }) => {
+  await login(page);
+  await page.goto('/transactions');
+
+  await page.getByTestId('mobile-filters-button').click();
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('#filter-categories').click();
+  const search = dialog.getByRole('combobox', { name: 'Search categories' });
+  await search.fill('rent');
+  await dialog.getByRole('option', { name: 'Rent' }).click();
+
+  const overflow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+
+  await dialog.getByRole('button', { name: 'Apply' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(/categoryIds=/);
+  await expect(page.getByTestId('mobile-filters-button').locator('span')).toHaveText('1');
+});
