@@ -30,6 +30,7 @@ vi.mock('@/lib/db/prisma', () => ({ prisma: prismaMock }));
 const { assignToTargets, getZbbMonth, getZbbOverview, moveMoney, setAssignment, setBudgetMode } =
   await import('@/lib/services/zeroBased');
 const { ServiceValidationError } = await import('@/lib/services/common');
+const { READY_TO_ASSIGN } = await import('@/lib/budgets/zero-based-math');
 
 type TxRow = {
   id: string;
@@ -377,6 +378,49 @@ describe('moveMoney', () => {
       expect.objectContaining({
         where: { userId_categoryId_month: { userId: 'user-1', categoryId: 'save', month: 202610 } },
         update: { amount: '-30.00' },
+      }),
+    );
+  });
+
+  it('moves carried-in money back to Ready to Assign as a negative assignment', async () => {
+    zeroBased();
+
+    await moveMoney('user-1', {
+      fromCategoryId: 'save',
+      toCategoryId: READY_TO_ASSIGN,
+      month: 202610,
+      amount: 200,
+    });
+
+    // only the real category is checked and written; Ready to Assign has no cell
+    expect(prismaMock.category.count).toHaveBeenCalledWith({
+      where: { userId: 'user-1', id: { in: ['save'] } },
+    });
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_categoryId_month: { userId: 'user-1', categoryId: 'save', month: 202610 } },
+        update: { amount: '-200.00' },
+      }),
+    );
+  });
+
+  it('assigns from Ready to Assign on top of what the category already has', async () => {
+    zeroBased();
+    prismaMock.categoryAssignment.findUnique.mockResolvedValue({ amount: 50 });
+
+    await moveMoney('user-1', {
+      fromCategoryId: READY_TO_ASSIGN,
+      toCategoryId: 'food',
+      month: 202610,
+      amount: 25,
+    });
+
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_categoryId_month: { userId: 'user-1', categoryId: 'food', month: 202610 } },
+        update: { amount: '75.00' },
       }),
     );
   });

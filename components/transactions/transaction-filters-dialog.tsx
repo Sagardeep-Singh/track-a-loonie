@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
-import { Input, Label } from '@/components/ui/field';
+import { Label } from '@/components/ui/field';
+import { MoneyInput } from '@/components/ui/money-input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { FrontendCategory } from '@/lib/services/categories';
@@ -117,24 +118,18 @@ export const TransactionFiltersDialog = ({
         <div>
           <Label htmlFor="filter-amount-min">Amount range</Label>
           <div className="flex items-center gap-2">
-            <Input
+            <MoneyInput
               id="filter-amount-min"
-              type="number"
-              min={0}
-              step="0.01"
               placeholder="Min"
               value={draft.amountMin ?? ''}
-              onChange={(e) => setDraft({ ...draft, amountMin: e.target.value || null })}
+              onValueChange={(v) => setDraft({ ...draft, amountMin: v || null })}
             />
             <span className="text-ink-muted text-xs">to</span>
-            <Input
+            <MoneyInput
               id="filter-amount-max"
-              type="number"
-              min={0}
-              step="0.01"
               placeholder="Max"
               value={draft.amountMax ?? ''}
-              onChange={(e) => setDraft({ ...draft, amountMax: e.target.value || null })}
+              onValueChange={(v) => setDraft({ ...draft, amountMax: v || null })}
             />
           </div>
         </div>

@@ -12,6 +12,10 @@
  * future month reduces it today.
  */
 
+/** stands in for a category id in a move, meaning money comes from or goes
+ * back to Ready to Assign instead of another category */
+export const READY_TO_ASSIGN = 'ready-to-assign';
+
 export type ZbbCell = { categoryId: string; month: number; cents: number };
 
 export type ZbbCategoryMonth = {

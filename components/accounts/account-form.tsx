@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Check, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
+import { MoneyInput } from '@/components/ui/money-input';
 import {
   ACCOUNT_TYPE_GROUPS,
   ACCOUNT_TYPES,
@@ -83,11 +84,9 @@ export const AccountForm = ({
       </div>
       <div>
         <Label htmlFor="startingBalance">Starting balance</Label>
-        <Input
+        <MoneyInput
           id="startingBalance"
           name="startingBalance"
-          type="number"
-          step="0.01"
           defaultValue={account?.startingBalance ?? '0'}
         />
       </div>

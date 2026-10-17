@@ -5,9 +5,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRightLeft, Check, Goal, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input, Label, Select } from '@/components/ui/field';
+import { Label, Select } from '@/components/ui/field';
+import { MoneyInput } from '@/components/ui/money-input';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { BudgetRing } from '@/components/budgets/budget-ring';
+import { READY_TO_ASSIGN } from '@/lib/budgets/zero-based-math';
 import { deleteJSON, getJSON, patchJSON, postJSON, putJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { monthLabel } from '@/lib/period-selection';
@@ -131,14 +133,15 @@ export const ZeroBasedView = ({
 
   const openMove = (category: FrontendZbbCategory): void => {
     const overspent = Number(category.available) < 0;
-    // "Cover" pulls money into an overspent row; "Move" pushes money out
+    // "Cover" pulls money into an overspent row from a funded one; "Move"
+    // pushes money out, back to Ready to Assign unless another row is picked
     const other = categories.find(
-      (c) => c.categoryId !== category.categoryId && (!overspent || Number(c.available) > 0),
+      (c) => c.categoryId !== category.categoryId && Number(c.available) > 0,
     );
     setMoveError(null);
     setMove({
       fromCategoryId: overspent ? (other?.categoryId ?? '') : category.categoryId,
-      toCategoryId: overspent ? category.categoryId : (other?.categoryId ?? ''),
+      toCategoryId: overspent ? category.categoryId : READY_TO_ASSIGN,
       amount: overspent ? Math.abs(Number(category.available)).toFixed(2) : '',
     });
   };
@@ -338,17 +341,12 @@ export const ZeroBasedView = ({
                     <label htmlFor={`assigned-${c.categoryId}`} className="sr-only">
                       Assigned to {c.categoryName}
                     </label>
-                    <Input
+                    <MoneyInput
                       id={`assigned-${c.categoryId}`}
-                      className="w-28 rounded-[9px] text-right font-mono max-sm:[appearance:textfield] max-sm:[&::-webkit-inner-spin-button]:appearance-none max-sm:[&::-webkit-outer-spin-button]:appearance-none"
-                      type="number"
-                      step="0.01"
-                      inputMode="decimal"
+                      className="w-28 rounded-[9px] text-right font-mono"
                       value={drafts[c.categoryId] ?? c.assigned}
                       disabled={savingId === c.categoryId}
-                      onChange={(e) =>
-                        setDrafts((prev) => ({ ...prev, [c.categoryId]: e.target.value }))
-                      }
+                      onValueChange={(v) => setDrafts((prev) => ({ ...prev, [c.categoryId]: v }))}
                       onBlur={() => saveAssigned(c)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') e.currentTarget.blur();
@@ -429,16 +427,12 @@ export const ZeroBasedView = ({
           >
             <div>
               <Label htmlFor="target-amount">Monthly target</Label>
-              <Input
+              <MoneyInput
                 id="target-amount"
                 className="font-mono"
-                type="number"
-                step="0.01"
-                min="0.01"
-                inputMode="decimal"
                 autoFocus
                 value={targetEdit.amount}
-                onChange={(e) => setTargetEdit({ ...targetEdit, amount: e.target.value })}
+                onValueChange={(v) => setTargetEdit({ ...targetEdit, amount: v })}
                 required
               />
               <p className="text-ink-muted mt-1 text-xs">
@@ -491,6 +485,7 @@ export const ZeroBasedView = ({
                 <option value="" disabled>
                   Pick a category
                 </option>
+                <option value={READY_TO_ASSIGN}>Ready to Assign ({money(ready)})</option>
                 {categories.map((c) => (
                   <option key={c.categoryId} value={c.categoryId}>
                     {c.categoryName} ({money(c.available)})
@@ -509,6 +504,7 @@ export const ZeroBasedView = ({
                 <option value="" disabled>
                   Pick a category
                 </option>
+                <option value={READY_TO_ASSIGN}>Ready to Assign ({money(ready)})</option>
                 {categories.map((c) => (
                   <option key={c.categoryId} value={c.categoryId}>
                     {c.categoryName} ({money(c.available)})
@@ -518,15 +514,11 @@ export const ZeroBasedView = ({
             </div>
             <div>
               <Label htmlFor="move-amount">Amount</Label>
-              <Input
+              <MoneyInput
                 id="move-amount"
                 className="font-mono"
-                type="number"
-                step="0.01"
-                min="0.01"
-                inputMode="decimal"
                 value={move.amount}
-                onChange={(e) => setMove({ ...move, amount: e.target.value })}
+                onValueChange={(v) => setMove({ ...move, amount: v })}
                 required
               />
             </div>
