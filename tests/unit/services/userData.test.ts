@@ -17,6 +17,7 @@ const { prismaMock } = vi.hoisted(() => {
     categoryRule: makeModel(),
     reimbursementLink: makeModel(),
     categoryAssignment: makeModel(),
+    savingsGoal: makeModel(),
     userBudgetSettings: { ...makeModel(), findUnique: vi.fn(), create: vi.fn() },
     // Not part of the 7-model export/import contract. Present only so the two
     // BYOK regression tests below can assert *zero* calls on it.
@@ -43,6 +44,7 @@ beforeEach(() => {
   prismaMock.$transaction.mockImplementation(
     async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock),
   );
+  prismaMock.savingsGoal.findMany.mockResolvedValue([]);
 });
 
 describe('exportUserData', () => {
@@ -108,6 +110,7 @@ describe('wipeUserData', () => {
       ['reimbursementLink', prismaMock.reimbursementLink],
       ['budget', prismaMock.budget],
       ['categoryRule', prismaMock.categoryRule],
+      ['savingsGoal', prismaMock.savingsGoal],
       ['transaction', prismaMock.transaction],
       ['importBatch', prismaMock.importBatch],
       ['category', prismaMock.category],
@@ -124,6 +127,7 @@ describe('wipeUserData', () => {
     expect(calls.indexOf('reimbursementLink')).toBeLessThan(calls.indexOf('transaction'));
     expect(calls.indexOf('budget')).toBeLessThan(calls.indexOf('category'));
     expect(calls.indexOf('categoryRule')).toBeLessThan(calls.indexOf('category'));
+    expect(calls.indexOf('savingsGoal')).toBeLessThan(calls.indexOf('category'));
     expect(calls.indexOf('transaction')).toBeLessThan(calls.indexOf('importBatch'));
     expect(calls.indexOf('importBatch')).toBeLessThan(calls.indexOf('category'));
     expect(calls.indexOf('category')).toBeLessThan(calls.indexOf('account'));
@@ -226,6 +230,7 @@ describe('importUserData', () => {
       categoryRules: 0,
       reimbursementLinks: 0,
       categoryAssignments: 0,
+      savingsGoals: 0,
     });
   });
 
@@ -362,6 +367,43 @@ describe('importUserData zero-based fields', () => {
     expect(prismaMock.userBudgetSettings.create).toHaveBeenCalledWith({
       data: { userId: 'user-1', mode: 'ZERO_BASED', zbbStartMonth: 202601 },
     });
+    expect(prismaMock.savingsGoal.createMany).not.toHaveBeenCalled();
+  });
+
+  it('restores savings goals (remapped) from a v3 file', async () => {
+    const result = await importUserData('user-1', {
+      ...v1File,
+      formatVersion: 3,
+      data: {
+        ...v1File.data,
+        savingsGoals: [
+          {
+            id: 'goal',
+            categoryId: 'old-cat',
+            targetAmount: '3000.00',
+            targetMonth: 202708,
+            startMonth: 202610,
+            startingAmount: '0.00',
+            archivedAt: null,
+            createdAt: new Date('2026-10-01T00:00:00.000Z'),
+          },
+        ],
+      },
+    } as never);
+
+    const [categoryArg] = prismaMock.category.createMany.mock.calls[0];
+    const [goalArg] = prismaMock.savingsGoal.createMany.mock.calls[0];
+    expect(goalArg.data[0]).toEqual(
+      expect.objectContaining({
+        userId: 'user-1',
+        categoryId: categoryArg.data[0].id,
+        targetAmount: '3000.00',
+        targetMonth: 202708,
+        startMonth: 202610,
+      }),
+    );
+    expect(goalArg.data[0].id).not.toBe('goal');
+    expect(result.counts.savingsGoals).toBe(1);
   });
 });
 

@@ -85,7 +85,7 @@ describe('userDataFileSchema', () => {
 
   it('rejects a different format version', () => {
     const file = validFile() as { formatVersion: number };
-    file.formatVersion = 3;
+    file.formatVersion = USER_DATA_FORMAT_VERSION + 1;
     const result = userDataFileSchema.safeParse(file);
     expect(result.success).toBe(false);
     expect(result.error?.issues[0].message).toBe(
@@ -386,5 +386,56 @@ describe('userDataFileSchema zero-based fields', () => {
     const rows = file.data.categoryAssignments as { id: string }[];
     rows.push({ ...rows[0], id: 'a-2' });
     expect(userDataFileSchema.safeParse(file).success).toBe(false);
+  });
+});
+
+describe('userDataFileSchema savings goals', () => {
+  const GOAL = {
+    id: 'g-1',
+    categoryId: 'cat-1',
+    targetAmount: '3000.00',
+    targetMonth: 202708,
+    startMonth: 202610,
+    startingAmount: '0.00',
+    archivedAt: null,
+    createdAt: '2026-10-01T00:00:00.000Z',
+  };
+  const withGoals = (
+    goals: Record<string, unknown>[],
+  ): Record<string, unknown> & { data: Record<string, unknown> } => {
+    const file = validFile() as Record<string, unknown> & { data: Record<string, unknown> };
+    file.data.savingsGoals = goals;
+    return file;
+  };
+
+  it('accepts a goal and still accepts a v2 file without goals', () => {
+    expect(userDataFileSchema.safeParse(withGoals([GOAL])).success).toBe(true);
+    const v2 = validFile() as { formatVersion: number };
+    v2.formatVersion = 2;
+    expect(userDataFileSchema.safeParse(v2).success).toBe(true);
+  });
+
+  it('rejects a goal on an unknown category, or two goals on one category', () => {
+    expect(userDataFileSchema.safeParse(withGoals([{ ...GOAL, categoryId: 'nope' }])).success).toBe(
+      false,
+    );
+    expect(userDataFileSchema.safeParse(withGoals([GOAL, { ...GOAL, id: 'g-2' }])).success).toBe(
+      false,
+    );
+  });
+
+  it('rejects a goal on a category that has a spending limit', () => {
+    const file = withGoals([GOAL]);
+    file.data.budgets = [{ id: 'b-1', categoryId: 'cat-1', month: 202610, limitAmount: '100.00' }];
+    expect(userDataFileSchema.safeParse(file).success).toBe(false);
+  });
+
+  it('rejects a target before the start or a starting amount at the target', () => {
+    expect(
+      userDataFileSchema.safeParse(withGoals([{ ...GOAL, targetMonth: 202609 }])).success,
+    ).toBe(false);
+    expect(
+      userDataFileSchema.safeParse(withGoals([{ ...GOAL, startingAmount: '3000.00' }])).success,
+    ).toBe(false);
   });
 });

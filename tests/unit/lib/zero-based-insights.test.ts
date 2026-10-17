@@ -39,6 +39,29 @@ const ids = (result: ReturnType<typeof buildZbbInsights>): string[] =>
   result.suggestions.map((s) => s.id);
 
 describe('buildZbbInsights health', () => {
+  it("measures a savings goal against this month's assignment, not its balance", () => {
+    const goal = {
+      ...cat('Trip', { carried: 545.46, assigned: 100, target: 272.73 }),
+      isGoal: true,
+    };
+    const limit = cat('Dining', { carried: 545.46, assigned: 100, target: 272.73 });
+    const result = buildZbbInsights(input({ categories: [goal, limit] }));
+    const byId = new Map(result.health.map((h) => [h.categoryId, h]));
+    expect(byId.get('trip')).toEqual(
+      expect.objectContaining({ status: 'underfunded', targetShortfallCents: 17273 }),
+    );
+    expect(byId.get('dining')?.targetShortfallCents).toBe(0);
+    expect(result.targetShortfallCents).toBe(17273);
+  });
+
+  it('never warns that a goal will run out', () => {
+    const goal = { ...cat('Trip', { assigned: 400, spent: 300 }), isGoal: true };
+    const result = buildZbbInsights(
+      input({ today: { day: 10, daysInMonth: 31 }, categories: [goal] }),
+    );
+    expect(result.health[0].runOutDay).toBeNull();
+  });
+
   it('flags a category that will run out before month end at the current pace', () => {
     // day 10 of 31: $300 spent of $400 means $30/day, empty around day 13
     const result = buildZbbInsights(

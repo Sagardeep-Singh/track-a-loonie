@@ -97,9 +97,8 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
   const hero = page.getByTestId('zbb-hero').filter({ visible: true });
   await expect(hero).toContainText('All assigned');
   await expect(page.getByTestId('zbb-suggestion-all-good').filter({ visible: true })).toBeVisible();
-  await expect(page.getByTestId('zbb-health-Groceries').filter({ visible: true })).toContainText(
-    'On track',
-  );
+  // desktop shows categories as rings (mobile keeps the bar list)
+  await expect(page.getByTestId('zbb-ring-Groceries')).toContainText('On track');
   await page.goto('/budgets');
 
   // assigning more than exists shows the error state instead of being refused

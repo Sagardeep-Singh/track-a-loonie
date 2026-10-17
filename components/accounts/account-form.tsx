@@ -21,7 +21,7 @@ export const AccountForm = ({
 }: {
   account?: FrontendAccount;
   onDone: () => void;
-  /** show the on-budget toggle; it only means something in zero-based mode */
+  /** words the on-budget toggle for zero-based budgeting instead of savings goals */
   zeroBased?: boolean;
 }): React.ReactElement => {
   const router = useRouter();
@@ -44,7 +44,7 @@ export const AccountForm = ({
       type: form.get('type'),
       startingBalance: form.get('startingBalance'),
       statementDay: type === 'CREDIT_CARD' ? form.get('statementDay') || null : null,
-      ...(zeroBased ? { onBudget } : {}),
+      onBudget,
     };
 
     const res = account
@@ -109,24 +109,23 @@ export const AccountForm = ({
           </p>
         </div>
       )}
-      {zeroBased && (
-        <label className="flex items-start gap-3 text-sm">
-          <input
-            type="checkbox"
-            name="onBudget"
-            className="accent-iris mt-0.5 size-4"
-            checked={onBudget}
-            onChange={(e) => setOnBudgetChoice(e.target.checked)}
-          />
-          <span>
-            On-budget
-            <span className="text-ink-muted mt-0.5 block text-xs">
-              Its balance counts toward Ready to Assign. Turn off for long-term savings you
-              don&rsquo;t want to budget.
-            </span>
+      <label className="flex items-start gap-3 text-sm">
+        <input
+          type="checkbox"
+          name="onBudget"
+          className="accent-iris mt-0.5 size-4"
+          checked={onBudget}
+          onChange={(e) => setOnBudgetChoice(e.target.checked)}
+        />
+        <span>
+          {zeroBased ? 'On-budget' : 'Spending account'}
+          <span className="text-ink-muted mt-0.5 block text-xs">
+            {zeroBased
+              ? 'Its balance counts toward Ready to Assign. Turn off for long-term savings you don’t want to budget.'
+              : 'Money you spend from day to day. Transfers out of it tagged with a savings goal’s category count toward the goal. Turn off for savings accounts.'}
           </span>
-        </label>
-      )}
+        </span>
+      </label>
       {error && (
         <p className="bg-rose-soft text-rose rounded-lg px-3 py-2 text-sm" role="alert">
           {error}

@@ -17,6 +17,9 @@ const { prismaMock } = vi.hoisted(() => ({
     reimbursementLink: {
       findMany: vi.fn(),
     },
+    savingsGoal: {
+      count: vi.fn(),
+    },
   },
 }));
 
@@ -29,6 +32,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
   prismaMock.transaction.findMany.mockResolvedValue([]);
+  prismaMock.savingsGoal.count.mockResolvedValue(0);
 });
 
 describe('listBudgets', () => {
@@ -313,6 +317,19 @@ describe('createBudget', () => {
     await expect(
       createBudget('user-1', { categoryId: 'cat-1', month: 202603, limitAmount: 100 }),
     ).rejects.toThrow(ServiceValidationError);
+    expect(prismaMock.budget.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a limit on a category that has a savings goal', async () => {
+    prismaMock.category.findFirst.mockResolvedValue({ id: 'cat-1', name: 'Trip to Japan' });
+    prismaMock.savingsGoal.count.mockResolvedValue(1);
+
+    await expect(
+      createBudget('user-1', { categoryId: 'cat-1', month: 202603, limitAmount: 100 }),
+    ).rejects.toThrow('This category has a savings goal');
+    expect(prismaMock.savingsGoal.count).toHaveBeenCalledWith({
+      where: { userId: 'user-1', categoryId: 'cat-1' },
+    });
     expect(prismaMock.budget.create).not.toHaveBeenCalled();
   });
 });

@@ -174,4 +174,19 @@ describe('targetTopUps', () => {
     );
     expect(result).toEqual([{ categoryId: 'a', topUpCents: 15000 }]);
   });
+
+  it("tops a goal up to this month's need, ignoring carried-in money", () => {
+    const result = targetTopUps(
+      [
+        { categoryId: 'goal', carriedInCents: 54546, assignedCents: 10000 },
+        { categoryId: 'limit', carriedInCents: 54546, assignedCents: 0 },
+      ],
+      new Map([
+        ['goal', 27273],
+        ['limit', 27273],
+      ]),
+      new Set(['goal']),
+    );
+    expect(result).toEqual([{ categoryId: 'goal', topUpCents: 17273 }]);
+  });
 });

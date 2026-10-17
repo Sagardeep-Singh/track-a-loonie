@@ -88,16 +88,23 @@ export const computeZbbMonth = (args: {
 };
 
 /**
- * How much "Assign to targets" adds to each category this month: enough to
- * bring carried-in plus assigned up to the target, never a negative top-up.
+ * How much "Assign to targets" adds to each category this month, never a
+ * negative top-up. A spending limit is a balance to keep, so carried-in plus
+ * assigned is topped up to it. A savings goal's target is this month's
+ * contribution, so only this month's assigned counts toward it; otherwise
+ * money carried over from earlier months would shrink every later month.
  */
 export const targetTopUps = (
   categories: Pick<ZbbCategoryMonth, 'categoryId' | 'carriedInCents' | 'assignedCents'>[],
   targetCentsByCategory: Map<string, number>,
+  goalCategoryIds: ReadonlySet<string> = new Set(),
 ): { categoryId: string; topUpCents: number }[] =>
   categories.flatMap((c) => {
     const target = targetCentsByCategory.get(c.categoryId);
     if (target === undefined) return [];
-    const topUpCents = target - (c.carriedInCents + c.assignedCents);
+    const funded = goalCategoryIds.has(c.categoryId)
+      ? c.assignedCents
+      : c.carriedInCents + c.assignedCents;
+    const topUpCents = target - funded;
     return topUpCents > 0 ? [{ categoryId: c.categoryId, topUpCents }] : [];
   });

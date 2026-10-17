@@ -10,6 +10,7 @@ import { prisma } from '@/lib/db/prisma';
 import { currentMonthNumber } from '@/lib/format';
 import { getEffectiveLimits } from '@/lib/services/budgets';
 import { ServiceValidationError } from '@/lib/services/common';
+import { getGoalEffects, getGoalTargets } from '@/lib/services/savingsGoals';
 import {
   fromCents,
   listReimbursedAmountsByExpenseDate,
@@ -42,6 +43,9 @@ export type FrontendZbbCategory = {
    * screen can patch it in place or fork a new value from this month */
   targetBudgetId: string | null;
   targetMonth: number | null;
+  /** set when the category has a savings goal; `target` is then this month's
+   * need, and the target can't be edited as a spending limit */
+  goal: { goalId: string; targetAmount: string; targetMonth: number } | null;
 };
 
 export type FrontendZbbMonth = {
@@ -240,7 +244,7 @@ export const getZbbMonth = async (userId: string, month: number): Promise<Fronte
   });
   const accountIds = accounts.map((a) => a.id);
 
-  const [categories, assignmentRows, activity, balanceCents, uncategorized, limits] =
+  const [categories, assignmentRows, activity, balanceCents, uncategorized, limits, goals] =
     await Promise.all([
       prisma.category.findMany({
         where: { userId },
@@ -255,6 +259,7 @@ export const getZbbMonth = async (userId: string, month: number): Promise<Fronte
       onBudgetBalanceCents(userId, accountIds),
       uncategorizedSummary(userId, accountIds, startMonth),
       getEffectiveLimits(userId, month),
+      getGoalTargets(userId, month),
     ]);
 
   const result = computeZbbMonth({
@@ -276,6 +281,25 @@ export const getZbbMonth = async (userId: string, month: number): Promise<Fronte
     readyToAssign: fromCents(result.readyToAssignCents),
     uncategorizedOnBudget: uncategorized,
     categories: result.categories.map((c) => {
+      const goal = goals.get(c.categoryId);
+      if (goal) {
+        return {
+          categoryId: c.categoryId,
+          categoryName: nameById.get(c.categoryId) ?? '',
+          carriedIn: fromCents(c.carriedInCents),
+          assigned: fromCents(c.assignedCents),
+          activity: fromCents(c.activityCents),
+          available: fromCents(c.availableCents),
+          target: fromCents(goal.needCents),
+          targetBudgetId: null,
+          targetMonth: null,
+          goal: {
+            goalId: goal.goalId,
+            targetAmount: goal.targetAmount,
+            targetMonth: goal.targetMonth,
+          },
+        };
+      }
       const limit = limits.get(c.categoryId);
       return {
         categoryId: c.categoryId,
@@ -287,6 +311,7 @@ export const getZbbMonth = async (userId: string, month: number): Promise<Fronte
         target: limit ? limit.limitAmount.toFixed(2) : null,
         targetBudgetId: limit?.budgetId ?? null,
         targetMonth: limit?.month ?? null,
+        goal: null,
       };
     }),
   };
@@ -365,8 +390,8 @@ export const moveMoney = async (
 };
 
 /**
- * Tops every category with a spending limit up to that limit for the month.
- * All or nothing: if Ready to Assign can't cover the total, nothing is written
+ * Tops every category with a spending limit up to that limit for the month,
+ * and every savings goal up to this month's need. All or nothing: if Ready to Assign can't cover the total, nothing is written
  * and the error names the shortfall.
  */
 export const assignToTargets = async (userId: string, month: number): Promise<FrontendZbbMonth> => {
@@ -384,6 +409,7 @@ export const assignToTargets = async (userId: string, month: number): Promise<Fr
         c.target === null ? [] : [[c.categoryId, toCents(c.target)] as const],
       ),
     ),
+    new Set(current.categories.flatMap((c) => (c.goal ? [c.categoryId] : []))),
   );
   if (topUps.length === 0) {
     return current;
@@ -412,6 +438,10 @@ export type FrontendZbbOverview = {
   /** on-budget income (not transfers or card payments) dated in `month` */
   incomeThisMonth: string;
   assignedThisMonth: string;
+  /** assigned to savings goal categories this month (part of assignedThisMonth) */
+  savedThisMonth: string;
+  /** category activity, leaving out goal categories except spending past what
+   * the goal had saved: saving and spending saved money aren't new spending */
   spentThisMonth: string;
   /** sum of every category's available, negatives included */
   availableTotal: string;
@@ -440,7 +470,7 @@ export const getZbbOverview = async (
   const { start, end } = monthRange(month);
   const next = shiftMonth(month, 1);
 
-  const [income, nextAssigned] = await Promise.all([
+  const [income, nextAssigned, goalEffects] = await Promise.all([
     prisma.transaction.aggregate({
       where: {
         userId,
@@ -456,6 +486,7 @@ export const getZbbOverview = async (
       where: { userId, month: next },
       _sum: { amount: true },
     }),
+    getGoalEffects(userId, month),
   ]);
 
   const categories = zbb.categories.map((c) => ({
@@ -466,6 +497,7 @@ export const getZbbOverview = async (
     activityCents: toCents(c.activity),
     availableCents: toCents(c.available),
     targetCents: c.target === null ? null : toCents(c.target),
+    isGoal: c.goal !== null,
   }));
   const isCurrentMonth = month === currentMonthNumber();
   const nextMonthAssignedCents = toCents(nextAssigned._sum.amount ?? 0);
@@ -495,7 +527,14 @@ export const getZbbOverview = async (
     readyToAssign: zbb.readyToAssign,
     incomeThisMonth: fromCents(toCents(income._sum.amount ?? 0)),
     assignedThisMonth: sum((c) => c.assignedCents),
-    spentThisMonth: sum((c) => c.activityCents),
+    // archived goals included, same as the Overview's saved figure
+    savedThisMonth: fromCents(goalEffects.savedByMonth.get(month) ?? 0),
+    spentThisMonth: fromCents(
+      categories.reduce(
+        (total, c) => total + (goalEffects.goalCategoryIds.has(c.categoryId) ? 0 : c.activityCents),
+        goalEffects.uncoveredByMonth.get(month) ?? 0,
+      ),
+    ),
     availableTotal: sum((c) => c.availableCents),
     nextMonthAssigned: fromCents(nextMonthAssignedCents),
     overspent: fromCents(insights.overspentCents),

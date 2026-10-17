@@ -1,6 +1,7 @@
 import { monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
+import { getGoalEffects } from '@/lib/services/savingsGoals';
 import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 
 export type TrendsRange = 3 | 6 | 12;
@@ -88,7 +89,7 @@ export const getSpendingTrends = async (
   // the last month's exclusive upper bound is the next month's first day
   const rangeEndDate = monthRange(allMonths[allMonths.length - 1]).end;
 
-  const [transactions, reimbursedExpenses, spreadShares] = await Promise.all([
+  const [transactions, reimbursedExpenses, spreadShares, goalEffects] = await Promise.all([
     prisma.transaction.findMany({
       where: { userId, date: { gte: rangeStart, lt: rangeEndDate } },
       include: {
@@ -98,6 +99,7 @@ export const getSpendingTrends = async (
     }),
     listReimbursedAmountsByExpenseDate(userId, rangeStart, rangeEndDate),
     listSpreadSharesInRange(userId, allMonths[0], allMonths[allMonths.length - 1]),
+    getGoalEffects(userId, allMonths[allMonths.length - 1]),
   ]);
 
   // Reimbursed amount per expense — nets out of every expense sum below,
@@ -110,8 +112,16 @@ export const getSpendingTrends = async (
       (reimbursedByTransaction.get(r.expenseTransactionId) ?? 0) + Number(r.amount),
     );
   }
+  // Spending a savings goal covers was counted as saved when it was put aside,
+  // so only the part past what was saved shows up as spending.
   const netExpenseAmount = (t: (typeof transactions)[number]): number =>
-    Math.max(0, Number(t.amount) - (reimbursedByTransaction.get(t.id) ?? 0));
+    // in cents, so a reimbursed and covered expense can't leave a float residue
+    Math.max(
+      0,
+      Math.round(Number(t.amount) * 100) -
+        Math.round((reimbursedByTransaction.get(t.id) ?? 0) * 100) -
+        (goalEffects.coveredByTransaction.get(t.id) ?? 0),
+    ) / 100;
   // Only the linked part of a reimbursement income is excluded.
   const netIncomeAmount = (t: (typeof transactions)[number]): number =>
     Math.max(
@@ -163,7 +173,12 @@ export const getSpendingTrends = async (
     const bucket = monthTotals.get(m);
     if (!bucket) continue;
     if (isIncome(t)) bucket.income += netIncomeAmount(t);
-    if (isExpense(t)) addExpense(m, t.category, netExpenseAmount(t), true);
+    if (!isExpense(t)) continue;
+    const amount = netExpenseAmount(t);
+    // fully covered goal spending isn't spending; keep it out of the category lines
+    if (amount > 0 || !goalEffects.coveredByTransaction.has(t.id)) {
+      addExpense(m, t.category, amount, true);
+    }
   }
   // one uncategorized spread payment is one transaction to categorize, not
   // one per month it covers

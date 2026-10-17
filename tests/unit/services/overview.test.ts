@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { prismaMock, spreadFindMany } = vi.hoisted(() => ({
+const { prismaMock, spreadFindMany, goalFindMany } = vi.hoisted(() => ({
   spreadFindMany: vi.fn(),
+  goalFindMany: vi.fn(),
   prismaMock: {
+    savingsGoal: { findMany: vi.fn() },
+    userBudgetSettings: { findUnique: vi.fn() },
     budget: { findMany: vi.fn() },
     transaction: { groupBy: vi.fn(), findMany: vi.fn() },
     account: { findFirst: vi.fn() },
@@ -21,13 +24,21 @@ vi.mock('@/lib/db/prisma', () => ({
     transaction: {
       ...prismaMock.transaction,
       findMany: (args?: {
-        where?: { reimbursementCompletedAt?: unknown; spreadEndMonth?: unknown };
+        where?: {
+          reimbursementCompletedAt?: unknown;
+          spreadEndMonth?: unknown;
+          isReimbursable?: unknown;
+          account?: unknown;
+        };
       }) =>
         args?.where?.reimbursementCompletedAt
           ? Promise.resolve([])
           : args?.where?.spreadEndMonth
             ? spreadFindMany(args)
-            : prismaMock.transaction.findMany(args),
+            : // savings goal spending and contribution lookups
+              args?.where?.isReimbursable === false || args?.where?.account
+              ? goalFindMany(args)
+              : prismaMock.transaction.findMany(args),
     },
   },
 }));
@@ -38,6 +49,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
   spreadFindMany.mockResolvedValue([]);
+  prismaMock.savingsGoal.findMany.mockResolvedValue([]);
+  prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
+  goalFindMany.mockResolvedValue([]);
 });
 
 describe('getOverviewData', () => {
@@ -594,5 +608,86 @@ describe('getOverviewData', () => {
       spreadStartMonth: { lte: 202603 },
       spreadEndMonth: { gte: 202603 },
     });
+  });
+
+  it('counts goal contributions as saved and leaves spending the goal covers out of expenses', async () => {
+    prismaMock.budget.findMany.mockResolvedValue([]);
+    prismaMock.transaction.groupBy.mockResolvedValue([]);
+    prismaMock.account.findFirst.mockResolvedValue(null);
+    prismaMock.categoryRule.findMany.mockResolvedValue([]);
+    prismaMock.savingsGoal.findMany.mockResolvedValue([
+      {
+        id: 'g1',
+        categoryId: 'cat-trip',
+        targetAmount: 3000,
+        targetMonth: 202708,
+        startMonth: 202610,
+        startingAmount: 0,
+        archivedAt: null,
+        category: { name: 'Trip to Japan' },
+      },
+    ]);
+    const day = (d: number): Date => new Date(Date.UTC(2027, 7, d));
+    goalFindMany.mockImplementation(async (args: { where: { account?: unknown } }) =>
+      args.where.account
+        ? [
+            {
+              categoryId: 'cat-trip',
+              amount: 3000,
+              date: new Date(Date.UTC(2026, 9, 5)),
+              type: 'EXPENSE',
+            },
+            { categoryId: 'cat-trip', amount: 200, date: day(1), type: 'EXPENSE' },
+          ]
+        : [
+            { id: 'flights', categoryId: 'cat-trip', amount: 2000, date: day(2) },
+            { id: 'hotel', categoryId: 'cat-trip', amount: 1500, date: day(3) },
+          ],
+    );
+    const row = (id: string, overrides: Record<string, unknown>): Record<string, unknown> => ({
+      id,
+      type: 'EXPENSE',
+      isPayment: false,
+      isTransfer: false,
+      reimbursementIncomeLinks: [],
+      payee: id,
+      categoryId: 'cat-trip',
+      category: { name: 'Trip to Japan' },
+      ...overrides,
+    });
+    prismaMock.transaction.findMany
+      .mockResolvedValueOnce([
+        row('pay', {
+          type: 'INCOME',
+          amount: 5000,
+          date: day(1),
+          categoryId: null,
+          category: null,
+        }),
+        row('contribution', { amount: 200, date: day(1), isTransfer: true }),
+        row('flights', { amount: 2000, date: day(2) }),
+        row('hotel', { amount: 1500, date: day(3) }),
+        row('food', {
+          amount: 100,
+          date: day(3),
+          categoryId: 'cat-food',
+          category: { name: 'Groceries' },
+        }),
+      ])
+      .mockResolvedValueOnce([]);
+
+    const result = await getOverviewData('user-1', { month: 202708, day: 3 });
+
+    // $3,200 saved covers $3,200 of the $3,500 trip; $300 past it is spending
+    expect(result.hero.saved).toBe('200.00');
+    expect(result.hero.expense).toBe('400.00');
+    expect(result.hero.net).toBe('4400.00');
+    expect(result.expenseBreakdown.map((s) => [s.categoryName, s.amount])).toEqual([
+      ['Trip to Japan', '300.00'],
+      ['Groceries', '100.00'],
+    ]);
+    expect(result.dayBars[1].expense).toBe(0);
+    expect(result.dayBars[2].expense).toBe(400);
+    expect(result.selectedDay.spent).toBe('400.00');
   });
 });
