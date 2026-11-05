@@ -202,13 +202,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     createTx({ accountId: ids.chips, date: '2026-01-20', ...data });
   await chip({ type: 'INCOME', amount: 100, payee: `Chips Salary ${stamp}` });
   await chip({ type: 'INCOME', amount: 200, payee: `Chips Payment ${stamp}`, isPayment: true });
-  await chip({
-    type: 'INCOME',
-    amount: 30,
-    payee: `Chips Payment+Transfer ${stamp}`,
-    isPayment: true,
-    isTransfer: true,
-  });
+  // a payment can't also be a transfer, so this is a second plain payment
+  await chip({ type: 'INCOME', amount: 30, payee: `Chips Payment 2 ${stamp}`, isPayment: true });
   await chip({ amount: 50, payee: `Chips Transfer ${stamp}`, isTransfer: true });
   const expense = await chip({
     amount: 40,
@@ -495,7 +490,7 @@ test('8. totals card keeps bucket precedence and nets reimbursed spending', asyn
   await expect(stat('Net')).toContainText('100.00');
   const excluded = (label: string): Locator =>
     bar.locator('span').filter({ hasText: label }).locator('span.font-money');
-  // payment AND transfer (30) counts toward payments only
+  // both payments (200 + 30)
   await expect(excluded('Payments')).toHaveText('$230.00');
   await expect(excluded('Transfers')).toHaveText('$50.00');
   await expect(excluded('Reimbursements')).toHaveText('$40.00');
