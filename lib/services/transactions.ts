@@ -1,3 +1,4 @@
+import { isLiabilityAccountType } from '@/lib/account-types';
 import { monthOfDate, monthsBetween } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { ReimbursementConflictError, ServiceValidationError } from '@/lib/services/common';
@@ -184,11 +185,36 @@ const assertOwnedRefs = async (
   }
 };
 
+/** A card payment settles a liability's previous statement, so only INCOME on
+ * a liability account (credit card, line of credit) can carry `isPayment`. The
+ * form already hides the checkbox elsewhere; this keeps API callers honest. */
+const assertPaymentAllowed = async (
+  userId: string,
+  accountId: string,
+  type: string,
+): Promise<void> => {
+  if (type !== 'INCOME') {
+    throw new ServiceValidationError('Only income can be marked as a card payment');
+  }
+  const account = await prisma.account.findFirst({
+    where: { id: accountId, userId },
+    select: { type: true },
+  });
+  if (!isLiabilityAccountType(account?.type)) {
+    throw new ServiceValidationError(
+      'Only a credit card or line of credit can receive a card payment',
+    );
+  }
+};
+
 export const createTransaction = async (
   userId: string,
   input: CreateTransactionInput,
 ): Promise<FrontendTransaction> => {
   await assertOwnedRefs(userId, input.accountId, input.categoryId);
+  if (input.isPayment) {
+    await assertPaymentAllowed(userId, input.accountId, input.type);
+  }
 
   const transaction = await prisma.transaction.create({
     data: {
@@ -279,6 +305,14 @@ export const updateTransaction = async (
     );
   }
 
+  if (resultingIsPayment) {
+    await assertPaymentAllowed(
+      userId,
+      input.accountId ?? existing.accountId,
+      input.type ?? existing.type,
+    );
+  }
+
   if (input.isReimbursable === false && expenseLinkedCents > 0) {
     throw new ReimbursementConflictError(
       "Remove this expense's reimbursement links before un-marking it",
@@ -342,7 +376,7 @@ export const updateTransaction = async (
     }
   }
 
-  const transaction = await prisma.transaction.update({
+  const updateRow = prisma.transaction.update({
     where: { id: transactionId },
     data: {
       accountId: input.accountId,
@@ -354,8 +388,8 @@ export const updateTransaction = async (
       note: input.note,
       isPayment: input.isPayment,
       isTransfer: input.isTransfer,
-      // un-marking a transfer drops the correlation id too, so a bad auto-match
-      // leaves nothing dangling on this row
+      // un-marking a transfer drops the correlation id too; the partner leg is
+      // unlinked below so the pair never ends up half-excluded
       transferMatchId: input.isTransfer === false ? null : undefined,
       isReimbursable: input.isReimbursable,
       reimbursementExpectedAmount:
@@ -370,7 +404,20 @@ export const updateTransaction = async (
     },
     include,
   });
-  return toFrontend(transaction);
+
+  // A matched pair is one transfer: un-marking either leg un-marks both, so a
+  // bad auto-match is fixed in one step and both legs can be re-matched later.
+  if (input.isTransfer === false && existing.transferMatchId) {
+    const [, transaction] = await prisma.$transaction([
+      prisma.transaction.updateMany({
+        where: { userId, transferMatchId: existing.transferMatchId, id: { not: transactionId } },
+        data: { isTransfer: false, transferMatchId: null },
+      }),
+      updateRow,
+    ]);
+    return toFrontend(transaction);
+  }
+  return toFrontend(await updateRow);
 };
 
 export const deleteTransaction = async (userId: string, transactionId: string): Promise<void> => {
