@@ -482,23 +482,33 @@ test('6. By statement places rows on each side of the close date correctly', asy
   await expect(inCurrent).toBeHidden();
 });
 
-test('8. totals card keeps bucket precedence and nets reimbursed spending', async () => {
+test('8. totals card keeps bucket precedence, nets reimbursed spending and toggles payments/transfers', async () => {
   await visit([ids.chips]);
   const bar = summary();
   await expect(bar).toContainText('6 transactions');
   const stat = (label: string): Locator =>
     bar.locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]');
+  const toggle = (label: string): Locator => bar.getByRole('button', { name: label });
+  // payment AND transfer (30) counts toward payments only
+  await expect(toggle('Payments')).toContainText('$230.00');
+  await expect(toggle('Transfers')).toContainText('$50.00');
+  await expect(bar.getByText('Not in totals: Reimbursements')).toContainText('$40.00');
+
+  // included by default: $230 of payment income in Credit, the $50 transfer out in Debit
+  await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle('Transfers')).toHaveAttribute('aria-pressed', 'true');
+  await expect(stat('Credit')).toContainText('330.00');
+  await expect(stat('Debit')).toContainText('50.00');
+  await expect(stat('Net')).toContainText('280.00');
+
+  await toggle('Payments').click();
+  await toggle('Transfers').click();
+  await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'false');
   // the $40 payback is linked reimbursement income, so it is NOT credit
   await expect(stat('Credit')).toContainText('100.00');
   // the $40 lunch is fully reimbursed, so it nets out of Debit (like Overview's Out)
   await expect(stat('Debit')).toContainText('0.00');
   await expect(stat('Net')).toContainText('100.00');
-  const excluded = (label: string): Locator =>
-    bar.locator('span').filter({ hasText: label }).locator('span.font-money');
-  // payment AND transfer (30) counts toward payments only
-  await expect(excluded('Payments')).toHaveText('$230.00');
-  await expect(excluded('Transfers')).toHaveText('$50.00');
-  await expect(excluded('Reimbursements')).toHaveText('$40.00');
 });
 
 test('8b. the pending reimbursements filter narrows server-side', async () => {
