@@ -29,7 +29,8 @@ export type BudgetMode = 'LIMITS' | 'ZERO_BASED';
 export type FrontendBudgetSettings = {
   mode: BudgetMode;
   zbbStartMonth: number | null;
-  /** false: a reimbursement counts in the month its money arrives (default) */
+  /** false (default): a reimbursement is income in the month it arrives and
+   * the expense stays in full; true: it nets out of the expense's month */
   reimbursementsInExpenseMonth: boolean;
 };
 
@@ -169,8 +170,8 @@ const onBudgetBalanceCents = async (userId: string, accountIds: string[]): Promi
 
 /**
  * Category activity from the start month on: categorized EXPENSEs on on-budget
- * accounts, net of reimbursements (in the month they count, as in
- * `listBudgets`). A transfer leg counts only when its counterpart sits on an
+ * accounts, net of reimbursements (only with the expense-month
+ * setting, as in `listBudgets`). A transfer leg counts only when its counterpart sits on an
  * off-budget account — money leaving the budget for savings is spending from
  * the budget's point of view; a card payment between two on-budget accounts
  * isn't. Spread expenses deliberately count in their payment month here, not
@@ -233,7 +234,7 @@ const categoryActivity = async (
     if (!r.categoryId || !onBudgetExpenseIds.has(r.expenseTransactionId)) continue;
     cells.push({
       categoryId: r.categoryId,
-      month: monthOfDate(new Date(r.date)),
+      month: monthOfDate(new Date(r.expenseDate)),
       cents: -toCents(r.amount),
     });
   }

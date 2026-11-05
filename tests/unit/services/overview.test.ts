@@ -281,6 +281,9 @@ describe('getOverviewData', () => {
   });
 
   it('excludes an income transaction with an active reimbursement link from income totals', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      reimbursementsInExpenseMonth: true,
+    });
     prismaMock.budget.findMany.mockResolvedValue([]);
     prismaMock.transaction.groupBy.mockResolvedValue([]);
     prismaMock.account.findFirst.mockResolvedValue(null);
@@ -308,6 +311,9 @@ describe('getOverviewData', () => {
   });
 
   it('only excludes the linked part of an income used as a reimbursement', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      reimbursementsInExpenseMonth: true,
+    });
     prismaMock.budget.findMany.mockResolvedValue([]);
     prismaMock.transaction.groupBy.mockResolvedValue([]);
     prismaMock.account.findFirst.mockResolvedValue(null);
@@ -361,6 +367,9 @@ describe('getOverviewData', () => {
   });
 
   it('nets a reimbursed expense out of hero.expense, the pie, day bars, and daySpent', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      reimbursementsInExpenseMonth: true,
+    });
     prismaMock.budget.findMany.mockResolvedValue([]);
     prismaMock.transaction.groupBy.mockResolvedValue([]);
     prismaMock.account.findFirst.mockResolvedValue(null);
@@ -410,16 +419,16 @@ describe('getOverviewData', () => {
     expect(result.selectedDay.rows[0].amount).toBe('100.00');
   });
 
-  it('nets a reimbursement for an earlier month out of the month and day its money arrived', async () => {
+  it('by default keeps a reimbursed expense in full and counts the payback as income', async () => {
     prismaMock.budget.findMany.mockResolvedValue([]);
     prismaMock.transaction.groupBy.mockResolvedValue([]);
     prismaMock.account.findFirst.mockResolvedValue(null);
     prismaMock.transaction.findMany
       .mockResolvedValueOnce([
         {
-          id: 'exp-mar',
+          id: 'exp-1',
           type: 'EXPENSE',
-          amount: 50,
+          amount: 100,
           date: new Date(Date.UTC(2026, 2, 5)),
           isPayment: false,
           isTransfer: false,
@@ -428,39 +437,27 @@ describe('getOverviewData', () => {
           reimbursementIncomeLinks: [],
         },
         {
-          id: 'exp-mar-2',
-          type: 'EXPENSE',
-          amount: 30,
+          id: 'inc-1',
+          type: 'INCOME',
+          amount: 40,
           date: new Date(Date.UTC(2026, 2, 12)),
           isPayment: false,
           isTransfer: false,
-          categoryId: 'cat-2',
-          category: { name: 'Food' },
-          reimbursementIncomeLinks: [],
+          categoryId: null,
+          category: null,
+          reimbursementIncomeLinks: [{ amount: 40 }],
         },
       ])
       .mockResolvedValueOnce([]);
-    // a January expense of 100 paid back with 70 on March 12
-    prismaMock.reimbursementLink.findMany.mockResolvedValue([
-      {
-        amount: 70,
-        expenseTransactionId: 'exp-jan',
-        createdAt: new Date(Date.UTC(2026, 2, 12)),
-        income: { date: new Date(Date.UTC(2026, 2, 12)) },
-        expense: { categoryId: 'cat-1', date: new Date(Date.UTC(2026, 0, 10)), amount: 100 },
-      },
-    ]);
     prismaMock.categoryRule.findMany.mockResolvedValue([]);
 
     const result = await getOverviewData('user-1', { month: 202603, day: 5 });
 
-    // only 50 of Work spending this month to offset: clamped, never credit
-    expect(result.hero.expense).toBe('30.00');
-    expect(result.expenseBreakdown.map((s) => [s.categoryName, s.amount])).toEqual([
-      ['Food', '30.00'],
-    ]);
-    expect(result.dayBars.find((d) => d.day === 5)?.expense).toBe(50);
-    expect(result.dayBars.find((d) => d.day === 12)?.expense).toBe(0);
+    expect(result.hero.expense).toBe('100.00');
+    expect(result.hero.income).toBe('40.00');
+    expect(result.dayBars.find((d) => d.day === 5)?.expense).toBe(100);
+    // nothing to net, so the link table isn't read at all
+    expect(prismaMock.reimbursementLink.findMany).not.toHaveBeenCalled();
   });
 
   it('does not net reimbursements out of the credit card cycle balance/spend', async () => {

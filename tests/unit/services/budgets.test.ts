@@ -16,7 +16,6 @@ const { prismaMock } = vi.hoisted(() => ({
     },
     reimbursementLink: {
       findMany: vi.fn(),
-      groupBy: vi.fn(),
     },
     userBudgetSettings: {
       findUnique: vi.fn(),
@@ -35,7 +34,6 @@ const { ServiceValidationError } = await import('@/lib/services/common');
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
-  prismaMock.reimbursementLink.groupBy.mockResolvedValue([]);
   prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
   prismaMock.transaction.findMany.mockResolvedValue([]);
   prismaMock.savingsGoal.count.mockResolvedValue(0);
@@ -346,66 +344,24 @@ describe('createBudget', () => {
   });
 });
 
-describe('listBudgets reimbursement net-out (default: month the money arrives)', () => {
-  const marchBudget = [
-    {
-      id: 'b1',
-      categoryId: 'cat-1',
-      month: 202603,
-      limitAmount: 200,
-      category: { name: 'Groceries' },
-    },
-  ];
-
-  it('lowers the month a January expense was paid back in, not January', async () => {
-    prismaMock.budget.findMany.mockResolvedValue(marchBudget);
+describe('listBudgets reimbursement net-out (default)', () => {
+  it('keeps spend in full: reimbursements are income, not negative spend', async () => {
+    prismaMock.budget.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        categoryId: 'cat-1',
+        month: 202603,
+        limitAmount: 200,
+        category: { name: 'Groceries' },
+      },
+    ]);
     prismaMock.transaction.groupBy.mockResolvedValue([
       { categoryId: 'cat-1', _sum: { amount: 90 } },
-    ]);
-    prismaMock.reimbursementLink.findMany.mockResolvedValue([
-      {
-        amount: 40,
-        expenseTransactionId: 'tx-jan',
-        createdAt: new Date('2026-03-04'),
-        income: { date: new Date('2026-03-04') },
-        expense: { categoryId: 'cat-1', date: new Date('2026-01-10'), amount: 100 },
-      },
     ]);
 
     const result = await listBudgets('user-1', 202603);
 
-    expect(result[0].spent).toBe('50.00');
-    expect(prismaMock.reimbursementLink.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          userId: 'user-1',
-          income: { date: { gte: new Date('2026-03-01'), lt: new Date('2026-04-01') } },
-        }),
-      }),
-    );
-  });
-
-  it('caps a link at what is left of its expense after earlier reimbursements', async () => {
-    prismaMock.budget.findMany.mockResolvedValue(marchBudget);
-    prismaMock.transaction.groupBy.mockResolvedValue([
-      { categoryId: 'cat-1', _sum: { amount: 90 } },
-    ]);
-    prismaMock.reimbursementLink.findMany.mockResolvedValue([
-      {
-        amount: 60,
-        expenseTransactionId: 'tx-jan',
-        createdAt: new Date('2026-03-04'),
-        income: { date: new Date('2026-03-04') },
-        expense: { categoryId: 'cat-1', date: new Date('2026-01-10'), amount: 100 },
-      },
-    ]);
-    // 70 of the 100 was already paid back in February
-    prismaMock.reimbursementLink.groupBy.mockResolvedValue([
-      { expenseTransactionId: 'tx-jan', _sum: { amount: 70 } },
-    ]);
-
-    const result = await listBudgets('user-1', 202603);
-
-    expect(result[0].spent).toBe('60.00');
+    expect(result[0].spent).toBe('90.00');
+    expect(prismaMock.reimbursementLink.findMany).not.toHaveBeenCalled();
   });
 });

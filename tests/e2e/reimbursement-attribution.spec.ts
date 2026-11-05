@@ -46,16 +46,16 @@ const setUp = async (page: Page): Promise<void> => {
 
 const budgetCard = (page: Page): Locator => page.getByText(/of \$400\.00/).last();
 
-test('a reimbursement counts in the month it arrives unless the user picks the expense month', async ({
+test('a reimbursable expense stays in full in its month unless the user picks the expense month', async ({
   page,
 }) => {
   await setUp(page);
 
-  // default: January keeps its full spend, March takes the $40 off
+  // default: both months keep their full spend; the $40 is income in March
   await page.goto('/budgets?month=202601');
   await expect(budgetCard(page)).toContainText('$100.00 of $400.00');
   await page.goto('/budgets?month=202603');
-  await expect(budgetCard(page)).toContainText('$50.00 of $400.00');
+  await expect(budgetCard(page)).toContainText('$90.00 of $400.00');
 
   // the payback row is labelled as a reimbursement
   await page.goto('/transactions?from=2026-03-01&to=2026-03-31');

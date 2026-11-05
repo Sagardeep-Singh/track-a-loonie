@@ -484,7 +484,7 @@ test('6. By statement places rows on each side of the close date correctly', asy
   await expect(inCurrent).toBeHidden();
 });
 
-test('8. totals card keeps bucket precedence, nets reimbursed spending and toggles payments/transfers', async () => {
+test('8. totals card keeps bucket precedence, counts reimbursements as credit and toggles payments/transfers', async () => {
   await visit([ids.chips]);
   const bar = summary();
   await expect(bar).toContainText('6 transactions');
@@ -494,24 +494,23 @@ test('8. totals card keeps bucket precedence, nets reimbursed spending and toggl
   // payment AND transfer (30) counts toward payments only
   await expect(toggle('Payments')).toContainText('$230.00');
   await expect(toggle('Transfers')).toContainText('$50.00');
-  // the $40 payback is netted from Debit by default, so it isn't listed as kept out
+  // by default the $40 payback is ordinary credit, so nothing is kept out
   await expect(bar.getByText('Not in totals: Reimbursements')).toHaveCount(0);
 
   // included by default: $230 of payment income in Credit, the $50 transfer out in Debit
   await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'true');
   await expect(toggle('Transfers')).toHaveAttribute('aria-pressed', 'true');
-  await expect(stat('Credit')).toContainText('330.00');
-  await expect(stat('Debit')).toContainText('50.00');
+  await expect(stat('Credit')).toContainText('370.00');
+  await expect(stat('Debit')).toContainText('90.00');
   await expect(stat('Net')).toContainText('280.00');
 
   await toggle('Payments').click();
   await toggle('Transfers').click();
   await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'false');
-  // the $40 payback is linked reimbursement income, so it is NOT credit
-  await expect(stat('Credit')).toContainText('100.00');
-  // the $40 payback lands in the same view, so it comes off Debit (like
-  // Overview's Out in the month the money arrives)
-  await expect(stat('Debit')).toContainText('0.00');
+  // the $40 payback is credit when it arrives and the $40 lunch stays in full
+  // in Debit, in the month it was incurred
+  await expect(stat('Credit')).toContainText('140.00');
+  await expect(stat('Debit')).toContainText('40.00');
   await expect(stat('Net')).toContainText('100.00');
 });
 

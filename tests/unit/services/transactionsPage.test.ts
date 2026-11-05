@@ -504,17 +504,16 @@ describe('getTransactionsPage — Mode A', () => {
     expect(result.summary.debit).toBe('70.00');
   });
 
-  it('by default nets reimbursement income in view off Debit instead of each expense', async () => {
+  it('by default keeps reimbursable expenses in full and counts reimbursements as credit', async () => {
     prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
     mockModeA(rowsDescending(1), [
-      // linked money counts where it arrives, so this stays gross
       dbRow({
         id: 'a',
         date: '2026-06-01',
         amount: 100,
         reimbursable: { expected: 100, linked: [30] },
       }),
-      // a manual top-up (60 expected, 10 linked) still nets on the expense
+      // marked fully reimbursed by hand: still in full
       dbRow({
         id: 'b',
         date: '2026-06-01',
@@ -522,7 +521,6 @@ describe('getTransactionsPage — Mode A', () => {
         reimbursable: { expected: 60, linked: [10] },
         reimbursementCompletedAt: new Date('2026-06-02'),
       }),
-      // 25 of this income is a reimbursement: off Debit, not Credit
       dbRow({
         id: 'c',
         date: '2026-06-03',
@@ -535,9 +533,8 @@ describe('getTransactionsPage — Mode A', () => {
 
     const result = await getTransactionsPage('user-1', { ...scope(), limit: 50 });
 
-    // 100 + (60 - 50) - 25
-    expect(result.summary.debit).toBe('85.00');
-    expect(result.summary.credit).toBe('15.00');
+    expect(result.summary.debit).toBe('160.00');
+    expect(result.summary.credit).toBe('40.00');
     expect(result.summary.reimbursementIncome).toBe('0.00');
   });
 

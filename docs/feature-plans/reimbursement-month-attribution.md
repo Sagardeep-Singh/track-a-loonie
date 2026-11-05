@@ -47,8 +47,23 @@ transfer or a reimbursable expense.
 - [x] E2E: `tests/e2e/reimbursement-attribution.spec.ts` (setting flips which month's budget
       drops) and badge checks in `tests/e2e/transactions-pagination.spec.ts`.
 
-## Known trade-off
+## Revision: reimbursements count as income by default
 
-On Overview, a reimbursement for an earlier month's expense comes off its category first, then
-off the day the money arrived, each clamped at 0. When that day had less spending than the
-reimbursement, the day bars can add up to more than `hero.expense`.
+Follow-up request: a reimbursable expense should count toward Debit in full in the month it
+was incurred, and the reimbursement should show as Credit (income) in the month it arrives,
+everywhere. This replaces the arrival-month netting above.
+
+- **Default (`reimbursementsInExpenseMonth = false`)**: nothing is netted out of any expense.
+  Budgets, Overview, Trends, zero-based activity and the transactions totals show expenses in
+  full in their own month. Linked reimbursement income counts as ordinary income/Credit in the
+  month it arrives. Manual "mark fully reimbursed" top-ups no longer lower anything (no money was
+  recorded).
+- **Expense-month setting (`true`)**: unchanged from before #107: links and manual top-ups net
+  out of the expense's month, and the linked part of the income is kept out of income.
+- The arrival-month netting (income-date link query, per-expense capping, cross-month category
+  and day-bar adjustments) is removed. `listReimbursedAmounts` returns `[]` in the default mode
+  and takes an optional `inExpenseMonth` so Overview/Trends read the setting once.
+
+- [x] `reimbursements.ts`, `overview.ts`, `trends.ts`, `zeroBased.ts`, `budgets.ts`,
+      `transaction-summary.ts`, settings copy and totals card comment.
+- [x] Unit tests and e2e expectations updated for both modes.

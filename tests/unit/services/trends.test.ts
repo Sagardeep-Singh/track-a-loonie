@@ -259,6 +259,9 @@ describe('getSpendingTrends', () => {
   });
 
   it('excludes an income transaction with an active reimbursement link from income totals', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      reimbursementsInExpenseMonth: true,
+    });
     prismaMock.transaction.findMany.mockResolvedValue([
       {
         id: 'inc-1',
@@ -279,6 +282,9 @@ describe('getSpendingTrends', () => {
   });
 
   it('only excludes the linked part of an income used as a reimbursement', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      reimbursementsInExpenseMonth: true,
+    });
     prismaMock.transaction.findMany.mockResolvedValue([
       {
         id: 'inc-1',
@@ -299,6 +305,9 @@ describe('getSpendingTrends', () => {
   });
 
   it('nets a reimbursed expense out of the month total and category breakdown', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      reimbursementsInExpenseMonth: true,
+    });
     prismaMock.transaction.findMany.mockResolvedValue([
       {
         id: 'exp-1',
@@ -328,8 +337,8 @@ describe('getSpendingTrends', () => {
     expect(result.headline.currentTotal).toBe('70.00');
   });
 
-  describe('a reimbursement for an expense from an earlier month', () => {
-    const ledger = [
+  it('by default keeps a reimbursed expense in full in its month and counts the payback as income', async () => {
+    prismaMock.transaction.findMany.mockResolvedValue([
       {
         id: 'exp-jan',
         type: 'EXPENSE',
@@ -341,61 +350,28 @@ describe('getSpendingTrends', () => {
         category: { id: 'cat-1', name: 'Work' },
       },
       {
-        id: 'exp-feb',
-        type: 'EXPENSE',
-        amount: 80,
-        date: new Date(Date.UTC(2026, 1, 5)),
+        id: 'inc-feb',
+        type: 'INCOME',
+        amount: 60,
+        date: new Date(Date.UTC(2026, 1, 20)),
         isPayment: false,
         isTransfer: false,
-        reimbursementIncomeLinks: [],
-        category: { id: 'cat-1', name: 'Work' },
+        reimbursementIncomeLinks: [{ amount: 60 }],
+        category: null,
       },
-    ];
+    ]);
 
-    it('lowers the month the money arrived by default, leaving the expense month alone', async () => {
-      prismaMock.transaction.findMany.mockResolvedValue(ledger);
-      prismaMock.reimbursementLink.findMany.mockResolvedValue([
-        {
-          amount: 60,
-          expenseTransactionId: 'exp-jan',
-          createdAt: new Date(Date.UTC(2026, 1, 20)),
-          income: { date: new Date(Date.UTC(2026, 1, 20)) },
-          expense: { categoryId: 'cat-1', date: new Date(Date.UTC(2026, 0, 10)), amount: 100 },
-        },
-      ]);
+    const result = await getSpendingTrends('user-1', { month: 202602, range: 3 });
 
-      const result = await getSpendingTrends('user-1', { month: 202602, range: 3 });
-
-      expect(result.months.find((m) => m.month === 202601)!.expense).toBe(100);
-      expect(result.months.find((m) => m.month === 202602)!.expense).toBe(20);
-      expect(prismaMock.reimbursementLink.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ income: { date: expect.any(Object) } }),
-        }),
-      );
-    });
-
-    it('lowers the expense month when the user opts into expense-month attribution', async () => {
-      prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
-        reimbursementsInExpenseMonth: true,
-      });
-      prismaMock.transaction.findMany.mockResolvedValue(ledger);
-      prismaMock.reimbursementLink.findMany.mockResolvedValue([
-        {
-          amount: 60,
-          expenseTransactionId: 'exp-jan',
-          expense: { categoryId: 'cat-1', date: new Date(Date.UTC(2026, 0, 10)) },
-        },
-      ]);
-
-      const result = await getSpendingTrends('user-1', { month: 202602, range: 3 });
-
-      expect(result.months.find((m) => m.month === 202601)!.expense).toBe(40);
-      expect(result.months.find((m) => m.month === 202602)!.expense).toBe(80);
-    });
+    expect(result.months.find((m) => m.month === 202601)!.expense).toBe(100);
+    expect(result.months.find((m) => m.month === 202602)!.income).toBe(60);
+    expect(prismaMock.reimbursementLink.findMany).not.toHaveBeenCalled();
   });
 
   it('ranks movers using net (post-reimbursement) amounts, not gross', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      reimbursementsInExpenseMonth: true,
+    });
     prismaMock.transaction.findMany.mockResolvedValue([
       // prior: Dining 50, no reimbursement
       {

@@ -844,7 +844,6 @@ describe('listReimbursedAmounts (expense-month setting)', () => {
         expenseTransactionId: 'exp-1',
         categoryId: 'cat-1',
         expenseDate: new Date('2026-01-15').toISOString(),
-        date: new Date('2026-01-15').toISOString(),
         amount: '25.00',
       },
     ]);
@@ -905,73 +904,27 @@ describe('listReimbursedAmounts (expense-month setting)', () => {
         expenseTransactionId: 'exp-1',
         categoryId: 'cat-1',
         expenseDate: jan15,
-        date: jan15,
         amount: '10.00',
       },
       {
         expenseTransactionId: 'exp-1',
         categoryId: 'cat-1',
         expenseDate: jan15,
-        date: jan15,
         amount: '70.00',
       },
       {
         expenseTransactionId: 'exp-2',
         categoryId: null,
         expenseDate: jan20,
-        date: jan20,
         amount: '30.00',
       },
     ]);
   });
 });
 
-describe('listReimbursedAmounts (default: month the money arrives)', () => {
-  beforeEach(() => {
+describe('listReimbursedAmounts (default)', () => {
+  it('nets nothing, so expenses stay in full in their own month', async () => {
     prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
-    prismaMock.transaction.findMany.mockResolvedValue([]);
-    prismaMock.reimbursementLink.groupBy.mockResolvedValue([]);
-  });
-
-  const link = (amount: number, incomeDate: string, createdAt = incomeDate) => ({
-    amount,
-    expenseTransactionId: 'exp-1',
-    createdAt: new Date(createdAt),
-    income: { date: new Date(incomeDate) },
-    expense: { categoryId: 'cat-1', date: new Date('2026-01-15'), amount: 100 },
-  });
-
-  it('scopes links by the income date and dates each row on it', async () => {
-    prismaMock.reimbursementLink.findMany.mockResolvedValue([link(25, '2026-03-04')]);
-
-    const result = await listReimbursedAmounts(
-      'user-1',
-      new Date('2026-03-01'),
-      new Date('2026-04-01'),
-    );
-
-    expect(prismaMock.reimbursementLink.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          userId: 'user-1',
-          expense: { type: 'EXPENSE', isTransfer: false },
-          income: { date: { gte: new Date('2026-03-01'), lt: new Date('2026-04-01') } },
-        },
-      }),
-    );
-    expect(result).toEqual([
-      {
-        expenseTransactionId: 'exp-1',
-        categoryId: 'cat-1',
-        expenseDate: new Date('2026-01-15').toISOString(),
-        date: new Date('2026-03-04').toISOString(),
-        amount: '25.00',
-      },
-    ]);
-  });
-
-  it('skips the earlier-links lookup when nothing arrived in the window', async () => {
-    prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
 
     const result = await listReimbursedAmounts(
       'user-1',
@@ -980,57 +933,17 @@ describe('listReimbursedAmounts (default: month the money arrives)', () => {
     );
 
     expect(result).toEqual([]);
-    expect(prismaMock.reimbursementLink.groupBy).not.toHaveBeenCalled();
+    expect(prismaMock.reimbursementLink.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.transaction.findMany).not.toHaveBeenCalled();
   });
 
-  it('caps links oldest first so the total never passes the expense amount', async () => {
-    // 30 already came back before March; then 50 and 40 arrive in March
-    prismaMock.reimbursementLink.groupBy.mockResolvedValue([
-      { expenseTransactionId: 'exp-1', _sum: { amount: 30 } },
-    ]);
-    prismaMock.reimbursementLink.findMany.mockResolvedValue([
-      link(40, '2026-03-20'),
-      link(50, '2026-03-04'),
-    ]);
-
-    const result = await listReimbursedAmounts(
-      'user-1',
-      new Date('2026-03-01'),
-      new Date('2026-04-01'),
-    );
-
-    expect(result.map((r) => [r.date.slice(0, 10), r.amount])).toEqual([
-      ['2026-03-04', '50.00'],
-      ['2026-03-20', '20.00'],
-    ]);
-  });
-
-  it('keeps manual top-ups on the expense date', async () => {
+  it('skips the settings lookup when the caller passes the setting', async () => {
     prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
-    prismaMock.transaction.findMany.mockResolvedValue([
-      {
-        id: 'exp-2',
-        categoryId: 'cat-1',
-        date: new Date('2026-03-10'),
-        reimbursementExpectedAmount: 30,
-        reimbursementExpenseLinks: [{ amount: 10 }],
-      },
-    ]);
+    prismaMock.transaction.findMany.mockResolvedValue([]);
 
-    const result = await listReimbursedAmounts(
-      'user-1',
-      new Date('2026-03-01'),
-      new Date('2026-04-01'),
-    );
+    await listReimbursedAmounts('user-1', new Date('2026-03-01'), new Date('2026-04-01'), true);
 
-    expect(result).toEqual([
-      {
-        expenseTransactionId: 'exp-2',
-        categoryId: 'cat-1',
-        expenseDate: new Date('2026-03-10').toISOString(),
-        date: new Date('2026-03-10').toISOString(),
-        amount: '20.00',
-      },
-    ]);
+    expect(prismaMock.userBudgetSettings.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.reimbursementLink.findMany).toHaveBeenCalled();
   });
 });

@@ -14,7 +14,7 @@ const { prismaMock } = vi.hoisted(() => {
       aggregate: vi.fn(),
     },
     budget: { findMany: vi.fn() },
-    reimbursementLink: { findMany: vi.fn(), groupBy: vi.fn() },
+    reimbursementLink: { findMany: vi.fn() },
     savingsGoal: { findMany: vi.fn() },
   };
   return {
@@ -97,7 +97,6 @@ beforeEach(() => {
   prismaMock.categoryAssignment.findUnique.mockResolvedValue(null);
   prismaMock.budget.findMany.mockResolvedValue([]);
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
-  prismaMock.reimbursementLink.groupBy.mockResolvedValue([]);
   prismaMock.savingsGoal.findMany.mockResolvedValue([]);
   mockTransactions({});
 });
@@ -267,8 +266,12 @@ describe('getZbbMonth', () => {
     );
   });
 
-  it('returns reimbursed money to the expense category', async () => {
-    zeroBased();
+  it('returns reimbursed money to the expense category with the expense-month setting', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      mode: 'ZERO_BASED',
+      zbbStartMonth: 202609,
+      reimbursementsInExpenseMonth: true,
+    });
     mockTransactions({
       expenses: [
         {
@@ -285,9 +288,7 @@ describe('getZbbMonth', () => {
       {
         amount: 20,
         expenseTransactionId: 'lunch',
-        createdAt: new Date('2026-10-09'),
-        income: { date: new Date('2026-10-09') },
-        expense: { categoryId: 'food', date: new Date('2026-10-04'), amount: 60 },
+        expense: { categoryId: 'food', date: new Date('2026-10-04') },
       },
     ]);
 
@@ -296,7 +297,7 @@ describe('getZbbMonth', () => {
     expect(result.categories.find((c) => c.categoryId === 'food')?.activity).toBe('40.00');
   });
 
-  it('leaves the expense month alone when the money comes back in a later month', async () => {
+  it('by default keeps category activity in full', async () => {
     zeroBased();
     mockTransactions({
       expenses: [
@@ -310,19 +311,11 @@ describe('getZbbMonth', () => {
         },
       ],
     });
-    prismaMock.reimbursementLink.findMany.mockResolvedValue([
-      {
-        amount: 20,
-        expenseTransactionId: 'lunch',
-        createdAt: new Date('2026-11-02'),
-        income: { date: new Date('2026-11-02') },
-        expense: { categoryId: 'food', date: new Date('2026-10-04'), amount: 60 },
-      },
-    ]);
 
     const result = await getZbbMonth('user-1', 202610);
 
     expect(result.categories.find((c) => c.categoryId === 'food')?.activity).toBe('60.00');
+    expect(prismaMock.reimbursementLink.findMany).not.toHaveBeenCalled();
   });
 
   it('reports uncategorized on-budget spending', async () => {

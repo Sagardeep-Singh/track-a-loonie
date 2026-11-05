@@ -65,8 +65,8 @@ export const listBudgets = async (userId: string, month: number): Promise<Fronte
       },
       _sum: { amount: true },
     }),
-    // net reimbursements out of spend, in the month they arrive by default or
-    // the expense's month when the user opts in (see listReimbursedAmounts)
+    // with the expense-month setting, reimbursements net out of the expense's
+    // month; by default spend stays in full (see listReimbursedAmounts)
     listReimbursedAmounts(userId, start, end),
     listSpreadSharesInRange(userId, month, month),
   ]);
