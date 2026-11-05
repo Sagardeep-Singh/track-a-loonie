@@ -11,6 +11,7 @@ const { prismaMock, webPushMock } = vi.hoisted(() => ({
     pushSubscription: { findMany: vi.fn(), update: vi.fn() },
     transaction: { groupBy: vi.fn() },
     importBatch: { groupBy: vi.fn() },
+    subscription: { findMany: vi.fn() },
   },
   // The only third-party seam: web-push is transport, so the service is tested
   // without ever touching real crypto or a push service.
@@ -288,6 +289,42 @@ describe('updateReminderPreference', () => {
 });
 
 describe('sendDueReminders', () => {
+  it('skips users whose plan has no push reminders, keeping their preference', async () => {
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_123');
+    prismaMock.notificationPreference.findMany.mockResolvedValue([
+      pref({ userId: 'plus-user' }),
+      pref({ id: 'pref-2', userId: 'free-user' }),
+    ]);
+    prismaMock.subscription.findMany.mockResolvedValue([
+      {
+        userId: 'plus-user',
+        plan: {
+          entitlements: {
+            limits: { accounts: null },
+            historyMonths: null,
+            features: {
+              trends: true,
+              reimbursements: true,
+              statementCycles: true,
+              pushReminders: true,
+            },
+          },
+        },
+      },
+    ]);
+    prismaMock.pushSubscription.findMany.mockResolvedValue([target()]);
+
+    try {
+      const summary = await sendDueReminders(NOW);
+      expect(summary.evaluated).toBe(1);
+      expect(summary.usersNotified).toBe(1);
+      expect(prismaMock.pushSubscription.findMany).toHaveBeenCalledTimes(1);
+      expect(prismaMock.notificationPreference.upsert).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('only ever loads enabled preferences — disabled users are never evaluated', async () => {
     prismaMock.notificationPreference.findMany.mockResolvedValue([]);
 

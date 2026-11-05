@@ -12,6 +12,7 @@ import { requestPasswordReset, resetPassword } from '@/lib/services/passwordRese
 import { checkRateLimit, RateLimitedError } from '@/lib/services/rateLimit';
 import { clientIpFromHeaders } from '@/lib/http/clientIp';
 import { AuthRateLimitedError } from '@/lib/auth/errors';
+import { nextQuery, safeReturnTo } from '@/lib/auth/return-to';
 import {
   isEmailVerificationConfigured,
   issueAndSendVerificationEmail,
@@ -69,7 +70,7 @@ export const signInAction = async (
     await signIn('credentials', {
       email: formData.get('email'),
       password: formData.get('password'),
-      redirectTo: '/dashboard',
+      redirectTo: safeReturnTo(formData.get('next')),
     });
   } catch (error) {
     if (error instanceof AuthRateLimitedError) {
@@ -82,8 +83,8 @@ export const signInAction = async (
   }
 };
 
-export const signInWithGoogleAction = async (): Promise<void> => {
-  await signIn('google', { redirectTo: '/dashboard' });
+export const signInWithGoogleAction = async (formData?: FormData): Promise<void> => {
+  await signIn('google', { redirectTo: safeReturnTo(formData?.get('next')) });
 };
 
 export const signUpAction = async (
@@ -131,7 +132,8 @@ export const signUpAction = async (
     // swallowed deliberately, see comment above
   }
 
-  redirect(`/login?signup=${isEmailVerificationConfigured() ? 'check-email' : 'done'}`);
+  const next = nextQuery(formData.get('next')?.toString()).replace('?', '&');
+  redirect(`/login?signup=${isEmailVerificationConfigured() ? 'check-email' : 'done'}${next}`);
 };
 
 export const requestPasswordResetAction = async (

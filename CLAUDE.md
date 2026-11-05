@@ -26,6 +26,7 @@ npm run test:watch                   # vitest watch
 npm run prisma:generate              # regenerate Prisma client after schema changes
 npm run prisma:migrate -- --name <name>  # create and apply migration
 npm run db:setup                     # generate + migrate + seed in one step
+npm run stripe:sync-plans            # pull Stripe plan products/prices into Plan/PlanPrice
 ```
 
 `npm run format` is check-only; use `npm run format:fix` to apply.

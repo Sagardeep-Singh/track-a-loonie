@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
+import { cancelSubscriptionForDeletion } from '@/lib/services/billing';
 import { GoogleReauthRequiredError, ServiceValidationError } from '@/lib/services/common';
 import { wipeUserData } from '@/lib/services/userData';
 import type { DeleteAccountInput } from '@/lib/validators/account-deletion';
@@ -44,6 +45,8 @@ export const deleteUserAccount = async (
       throw new GoogleReauthRequiredError('Confirm your identity with Google again, then retry.');
     }
   }
+
+  await cancelSubscriptionForDeletion(userId);
 
   await prisma.$transaction(
     async (tx) => {

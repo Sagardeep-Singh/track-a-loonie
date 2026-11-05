@@ -2,6 +2,7 @@ import { daysInMonth as daysInMonthOf, monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { listBudgets } from '@/lib/services/budgets';
 import { getCategorizeQueueStats } from '@/lib/services/categorize';
+import { clampMonthToHistory, hasFeature } from '@/lib/services/entitlements';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
 import { getGoalEffects } from '@/lib/services/savingsGoals';
 import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
@@ -120,7 +121,7 @@ export const getOverviewData = async (
   userId: string,
   options: { month?: number; day?: number } = {},
 ): Promise<OverviewData> => {
-  const month = options.month ?? currentMonth();
+  const month = await clampMonthToHistory(userId, options.month ?? currentMonth());
   const { start, end } = monthRange(month);
   const daysInMonth = daysInMonthOf(month);
   const isCurrentMonth = month === currentMonth();
@@ -296,7 +297,8 @@ export const getOverviewData = async (
   const triage = await getCategorizeQueueStats(userId);
 
   let cycleCard: OverviewCycleCard | null = null;
-  if (cardAccount && cardAccount.statementDay) {
+  // the statement day stays stored after a downgrade; the card only shows on Plus
+  if (cardAccount && cardAccount.statementDay && (await hasFeature(userId, 'statementCycles'))) {
     const period = getStatementPeriod(cardAccount.statementDay, now);
     const [cycleTransactions, allTransactions] = await Promise.all([
       prisma.transaction.findMany({

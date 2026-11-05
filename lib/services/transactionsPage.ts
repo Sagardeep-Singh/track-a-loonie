@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/prisma';
 import { ServiceValidationError } from '@/lib/services/common';
+import { clampRangeToHistory } from '@/lib/services/entitlements';
 import {
   fromCents,
   listPendingReimbursementExpenseIds,
@@ -464,8 +465,14 @@ const getPageModeB = async (
 
 export const getTransactionsPage = async (
   userId: string,
-  request: TransactionsPageRequest,
+  unclamped: TransactionsPageRequest,
 ): Promise<TransactionsPageResult> => {
+  // rows before the plan's history window stay stored but aren't listed
+  const range = await clampRangeToHistory(userId, {
+    from: parseDateParam(unclamped.filters.from),
+    to: parseDateParam(unclamped.filters.to),
+  });
+  const request = { ...unclamped, filters: { ...unclamped.filters, ...range } };
   let cursor: TransactionCursor | null = null;
   if (request.cursor !== undefined) {
     cursor = decodeTransactionCursor(request.cursor);

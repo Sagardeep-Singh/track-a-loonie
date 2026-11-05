@@ -6,6 +6,8 @@ import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { AccountForm } from '@/components/accounts/account-form';
+import { UpgradePrompt } from '@/components/billing/upgrade-prompt';
+import { usePlan } from '@/components/billing/plan-provider';
 import { ReimbursementSummaryCard } from '@/components/accounts/reimbursement-summary-card';
 import { deleteJSON } from '@/lib/api-client';
 import {
@@ -32,6 +34,7 @@ export const AccountsView = ({
   zeroBased?: boolean;
 }): React.ReactElement => {
   const router = useRouter();
+  const accountLimit = usePlan().entitlements.limits.accounts;
   const [dialogKey, setDialogKey] = useState(0);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<FrontendAccount | undefined>(undefined);
@@ -205,14 +208,22 @@ export const AccountsView = ({
       ))}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <button
-          type="button"
-          onClick={openCreate}
-          className="border-ink-muted/40 hover:border-iris hover:text-iris focus-visible:outline-iris text-ink-muted flex min-h-[190px] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2"
-        >
-          <Plus size={22} />
-          <span className="text-sm font-medium">Add an account</span>
-        </button>
+        {accountLimit !== null && initialAccounts.length >= accountLimit ? (
+          <UpgradePrompt
+            className="min-h-[190px] justify-center"
+            title={`Free includes ${accountLimit} accounts`}
+            description="Plus tracks every account you have, with all of your history."
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={openCreate}
+            className="border-ink-muted/40 hover:border-iris hover:text-iris focus-visible:outline-iris text-ink-muted flex min-h-[190px] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            <Plus size={22} />
+            <span className="text-sm font-medium">Add an account</span>
+          </button>
+        )}
       </div>
 
       <Modal

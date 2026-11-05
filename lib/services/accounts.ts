@@ -2,6 +2,7 @@ import { defaultOnBudgetFor } from '@/lib/account-types';
 import { prisma } from '@/lib/db/prisma';
 import { toSerializable } from '@/lib/utils';
 import { ServiceValidationError } from '@/lib/services/common';
+import { assertCanCreate, assertFeature } from '@/lib/services/entitlements';
 import { assertNoActiveLinks } from '@/lib/services/reimbursements';
 import type { CreateAccountInput, UpdateAccountInput } from '@/lib/validators/accounts';
 
@@ -70,6 +71,10 @@ export const createAccount = async (
   userId: string,
   input: CreateAccountInput,
 ): Promise<FrontendAccount> => {
+  await assertCanCreate(userId, 'accounts');
+  if (input.type === 'CREDIT_CARD' && input.statementDay) {
+    await assertFeature(userId, 'statementCycles');
+  }
   const account = await prisma.account.create({
     data: {
       userId,
@@ -101,6 +106,10 @@ export const updateAccount = async (
   const nextType = input.type ?? existing.type;
   if (nextType !== 'CREDIT_CARD' && input.statementDay) {
     throw new ServiceValidationError('statementDay only applies to credit card accounts');
+  }
+  // clearing it stays allowed after a downgrade; setting or changing it doesn't
+  if (input.statementDay && input.statementDay !== existing.statementDay) {
+    await assertFeature(userId, 'statementCycles');
   }
 
   const account = await prisma.account.update({

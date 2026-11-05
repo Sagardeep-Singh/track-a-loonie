@@ -4,6 +4,7 @@ import { listCategories } from '@/lib/services/categories';
 import { getUncategorizedMonthSummary } from '@/lib/services/categorize';
 import { listLimitAndGoalCategoryIds, listSavingsGoals } from '@/lib/services/savingsGoals';
 import { getBudgetSettings, getZbbMonth } from '@/lib/services/zeroBased';
+import { clampMonthToHistory } from '@/lib/services/entitlements';
 import { BudgetsView } from '@/components/budgets/budgets-view';
 import { ZeroBasedView } from '@/components/budgets/zero-based-view';
 import { BudgetModeCookieSync } from '@/components/budgets/budget-mode-cookie-sync';
@@ -30,9 +31,10 @@ const BudgetsPage = async ({
   const session = await getServerAuthSession();
   const userId = session!.user.id;
   // No month in the URL: open on the period last picked on any screen.
-  const month = monthParam
-    ? Number(monthParam)
-    : selectionMonth(await getStoredPeriod(), currentMonth());
+  const month = await clampMonthToHistory(
+    userId,
+    monthParam ? Number(monthParam) : selectionMonth(await getStoredPeriod(), currentMonth()),
+  );
   const header = (description: string): React.ReactElement => (
     <ScreenHeader
       title="Budgets"

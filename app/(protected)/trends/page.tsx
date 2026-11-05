@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { getServerAuthSession } from '@/lib/auth/session';
 import { getSpendingTrends, type TrendsRange } from '@/lib/services/trends';
+import { hasFeature } from '@/lib/services/entitlements';
+import { UpgradePrompt } from '@/components/billing/upgrade-prompt';
 import { ScreenHeader } from '@/components/nav/screen-header';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { RangePopover } from '@/components/trends/range-popover';
@@ -48,6 +50,18 @@ const TrendsPage = async ({
   const { month: monthParam, range: rangeParam } = await searchParams;
   const session = await getServerAuthSession();
   const userId = session!.user.id;
+  if (!(await hasFeature(userId, 'trends'))) {
+    return (
+      <div className="animate-[fade-up_0.3s_ease-out]">
+        <ScreenHeader title="Trends" description="How your spending moves across months." />
+        <UpgradePrompt
+          className="mt-6"
+          title="Spending trends are part of Plus"
+          description="See income and spending across 3, 6 or 12 months, which categories moved, and by how much."
+        />
+      </div>
+    );
+  }
   // No month in the URL: open on the period last picked on any screen.
   const month = monthParam
     ? Number(monthParam)

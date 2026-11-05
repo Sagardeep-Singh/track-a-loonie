@@ -8,6 +8,7 @@ import { listPushSubscriptions } from '@/lib/services/pushSubscriptions';
 import { getAiSettings, listAiModels } from '@/lib/services/aiSettings';
 import { getBudgetSettings } from '@/lib/services/zeroBased';
 import { listAccounts } from '@/lib/services/accounts';
+import { getBillingSummary } from '@/lib/services/billing';
 
 const SettingsPage = async (): Promise<React.ReactElement> => {
   const session = await getServerAuthSession();
@@ -19,6 +20,7 @@ const SettingsPage = async (): Promise<React.ReactElement> => {
     aiModels,
     budgetSettings,
     accounts,
+    billing,
   ] = await Promise.all([
     userHasPassword(session!.user.id),
     getReminderPreference(session!.user.id),
@@ -31,6 +33,7 @@ const SettingsPage = async (): Promise<React.ReactElement> => {
     listAiModels(session!.user.id),
     getBudgetSettings(session!.user.id),
     listAccounts(session!.user.id),
+    getBillingSummary(session!.user.id),
   ]);
 
   return (
@@ -49,6 +52,7 @@ const SettingsPage = async (): Promise<React.ReactElement> => {
         aiModels={aiModels}
         budgetSettings={budgetSettings}
         accounts={accounts}
+        billing={billing}
       />
       <SourceLink className="mt-12 text-center" />
     </div>

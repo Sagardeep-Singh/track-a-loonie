@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
+import { assertFeature } from '@/lib/services/entitlements';
 import type { PushTarget } from '@/lib/push/webPush';
 import type { SavePushSubscriptionInput } from '@/lib/validators/push';
 
@@ -83,6 +84,7 @@ export const savePushSubscription = async (
   input: SavePushSubscriptionInput,
   userAgent: string | null,
 ): Promise<FrontendPushSubscription> => {
+  await assertFeature(userId, 'pushReminders');
   const subscription = await prisma.pushSubscription.upsert({
     where: { endpoint: input.endpoint },
     create: {

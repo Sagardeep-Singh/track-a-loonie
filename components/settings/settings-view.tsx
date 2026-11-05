@@ -8,6 +8,10 @@ import { BudgetingSection } from '@/components/settings/budgeting-section';
 import { ExportDataCard } from '@/components/settings/export-data-card';
 import { ImportDataCard } from '@/components/settings/import-data-card';
 import { DeleteAccountCard } from '@/components/settings/delete-account-card';
+import { BillingSection } from '@/components/settings/billing-section';
+import { UpgradePrompt } from '@/components/billing/upgrade-prompt';
+import { usePlan } from '@/components/billing/plan-provider';
+import type { BillingSummary } from '@/lib/services/billing';
 import { pillOption } from '@/components/settings/pills';
 import { PillGroup, PillHighlight } from '@/components/settings/pill-group';
 import type { FrontendReminderPreference } from '@/lib/services/reminders';
@@ -46,6 +50,7 @@ export const SettingsView = ({
   aiModels,
   budgetSettings,
   accounts,
+  billing,
 }: {
   email: string;
   hasPassword: boolean;
@@ -57,7 +62,9 @@ export const SettingsView = ({
   aiModels: AiModelsResult;
   budgetSettings: FrontendBudgetSettings;
   accounts: FrontendAccount[];
+  billing: BillingSummary;
 }): React.ReactElement => {
+  const { entitlements } = usePlan();
   const palette = useSyncExternalStore(
     subscribeToPreferences,
     getPaletteSnapshot,
@@ -83,6 +90,8 @@ export const SettingsView = ({
           </span>
         </div>
       </div>
+
+      {billing.enabled && <BillingSection billing={billing} />}
 
       <div className="border-line bg-paper-raised rounded-2xl border p-5">
         <h2 className="font-display text-[15px] font-semibold">Preferences</h2>
@@ -132,11 +141,18 @@ export const SettingsView = ({
 
       <BudgetingSection settings={budgetSettings} accounts={accounts} />
 
-      <RemindersSection
-        available={remindersAvailable}
-        preference={reminderPreference}
-        devices={pushDevices}
-      />
+      {remindersAvailable && !entitlements.features.pushReminders ? (
+        <div className="border-line bg-paper-raised rounded-2xl border p-5">
+          <h2 className="font-display mb-3 text-[15px] font-semibold">Reminders</h2>
+          <UpgradePrompt compact title="Push reminders are part of Plus." />
+        </div>
+      ) : (
+        <RemindersSection
+          available={remindersAvailable}
+          preference={reminderPreference}
+          devices={pushDevices}
+        />
+      )}
 
       <AiCategorizationSection settings={aiSettings} models={aiModels} />
 

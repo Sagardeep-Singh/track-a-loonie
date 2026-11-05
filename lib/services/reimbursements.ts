@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db/prisma';
 import { ServiceValidationError, ReimbursementConflictError } from '@/lib/services/common';
 import { compileRuleMatcher } from '@/lib/services/categorize';
+import { assertFeature } from '@/lib/services/entitlements';
 import type {
   CreateReimbursementLinkInput,
   UpdateReimbursementLinkInput,
@@ -195,6 +196,7 @@ export const listReimbursementCandidates = async (
   expenseTransactionId: string,
   options: { limit?: number; search?: string } = {},
 ): Promise<ReimbursementCandidate[]> => {
+  await assertFeature(userId, 'reimbursements');
   const expense = await prisma.transaction.findFirst({
     where: { id: expenseTransactionId, userId },
     include: expenseInclude,
@@ -427,6 +429,7 @@ export const createReimbursementLink = async (
   input: CreateReimbursementLinkInput,
 ): Promise<FrontendExpenseReimbursement> => {
   const { expenseTransactionId, incomeTransactionId, amount } = input;
+  await assertFeature(userId, 'reimbursements');
   await assertLinkable(userId, expenseTransactionId, incomeTransactionId);
   const amountCents = toCents(amount);
 
@@ -464,6 +467,7 @@ export const updateReimbursementLink = async (
   linkId: string,
   input: UpdateReimbursementLinkInput,
 ): Promise<FrontendExpenseReimbursement> => {
+  await assertFeature(userId, 'reimbursements');
   const link = await prisma.reimbursementLink.findFirst({
     where: { id: linkId, userId },
     select: { expenseTransactionId: true, incomeTransactionId: true },

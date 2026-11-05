@@ -14,6 +14,7 @@ import { todayDateKey } from '@/lib/date';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { FrontendCategory } from '@/lib/services/categories';
 import type { FrontendTransaction } from '@/lib/services/transactions';
+import { usePlan } from '@/components/billing/plan-provider';
 
 export const TransactionForm = ({
   transaction,
@@ -57,6 +58,9 @@ export const TransactionForm = ({
     suggestFor,
     submit,
   } = useTransactionForm({ transaction, accounts });
+  // after a downgrade an already-reimbursable expense keeps its toggle and links
+  const reimbursementsAvailable =
+    usePlan().entitlements.features.reimbursements || !!transaction?.isReimbursable;
 
   const formRef = useRef<HTMLFormElement>(null);
   const [spreadError, setSpreadError] = useState<string | null>(null);
@@ -202,7 +206,7 @@ export const TransactionForm = ({
         This is a transfer between my own accounts
         <span className="text-ink-muted text-xs">(excluded from income and spending)</span>
       </label>
-      {canBeReimbursable && (
+      {canBeReimbursable && reimbursementsAvailable && (
         <div>
           <label className="text-ink flex items-center gap-2 text-sm">
             <input

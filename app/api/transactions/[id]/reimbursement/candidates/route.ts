@@ -3,6 +3,7 @@ import { requireUserId } from '@/lib/auth/session';
 import { listReimbursementCandidatesQuerySchema } from '@/lib/validators/reimbursements';
 import { listReimbursementCandidates } from '@/lib/services/reimbursements';
 import { ServiceValidationError } from '@/lib/services/common';
+import { planErrorResponse } from '@/lib/http/planError';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -25,6 +26,8 @@ export const GET = async (request: Request, { params }: RouteParams): Promise<Ne
   try {
     return NextResponse.json(await listReimbursementCandidates(userId, id, parsed.data));
   } catch (error) {
+    const planError = planErrorResponse(error);
+    if (planError) return planError;
     if (error instanceof ServiceValidationError) {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }

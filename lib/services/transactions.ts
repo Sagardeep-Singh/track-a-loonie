@@ -1,6 +1,7 @@
 import { monthOfDate, monthsBetween } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { ReimbursementConflictError, ServiceValidationError } from '@/lib/services/common';
+import { assertFeature, getHistoryFloor } from '@/lib/services/entitlements';
 import {
   assertNoActiveLinks,
   deriveReimbursementStatus,
@@ -150,6 +151,7 @@ export const listTransactions = async (
   userId: string,
   query: ListTransactionsQuery,
 ): Promise<FrontendTransaction[]> => {
+  const floor = await getHistoryFloor(userId);
   const transactions = await prisma.transaction.findMany({
     where: {
       userId,
@@ -157,7 +159,7 @@ export const listTransactions = async (
       categoryId: query.categoryId,
       importBatchId: query.batchId,
       date: {
-        gte: query.from,
+        gte: floor && (!query.from || query.from < floor) ? floor : query.from,
         lte: query.to,
       },
     },
@@ -189,6 +191,7 @@ export const createTransaction = async (
   input: CreateTransactionInput,
 ): Promise<FrontendTransaction> => {
   await assertOwnedRefs(userId, input.accountId, input.categoryId);
+  if (input.isReimbursable) await assertFeature(userId, 'reimbursements');
 
   const transaction = await prisma.transaction.create({
     data: {
@@ -237,6 +240,10 @@ export const updateTransaction = async (
   const resultingIsTransfer = input.isTransfer ?? existing.isTransfer;
   const resultingIsPayment = input.isPayment ?? existing.isPayment;
   const resultingIsReimbursable = input.isReimbursable ?? existing.isReimbursable;
+  // existing flags keep counting after a downgrade; marking a new one doesn't
+  if (resultingIsReimbursable && !existing.isReimbursable) {
+    await assertFeature(userId, 'reimbursements');
+  }
   const resultingAmountCents = toCents(input.amount ?? existing.amount);
   const resultingExpectedCents =
     input.reimbursementExpectedAmount !== undefined

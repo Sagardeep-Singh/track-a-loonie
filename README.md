@@ -37,6 +37,26 @@ master key, excluded from data export, and never returned to the client. Left un
 is invisible. See `.env.example` for the optional `AI_ANTHROPIC_BASE_URL` / `AI_OPENAI_BASE_URL`
 test overrides and `docs/runbooks/rotate-secret-encryption-key.md` for rotation.
 
+Paid plans are opt-in too. With no `STRIPE_SECRET_KEY` billing is off and every user gets
+every feature, which is the right setup for a self-hosted install. To turn it on (Free + Plus,
+billed through Stripe):
+
+1. In Stripe, create a Product per paid plan with a recurring Price, and give the Product this
+   metadata: `plan=true`, `limit_accounts=unlimited`, `history_months=all`, `feature_trends=true`,
+   `feature_reimbursements=true`, `feature_statement_cycles=true`, `feature_push_reminders=true`.
+   A missing or malformed key falls back to the Free value (2 accounts, 12 months, no Plus
+   features), which lives in `lib/billing/entitlements.ts`.
+2. Set `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` and `STRIPE_WEBHOOK_SECRET`.
+3. Add a webhook endpoint at `<origin>/api/stripe/webhook` for `product.*`, `price.*`,
+   `checkout.session.completed` and `customer.subscription.*` events. Locally, use
+   `stripe listen --forward-to localhost:3000/api/stripe/webhook`.
+4. Turn on the Customer Portal (Settings → Billing → Customer portal) so users can switch plans,
+   update their card and cancel.
+5. Run `npm run stripe:sync-plans` once to pull the existing products and prices in.
+
+"Upgrade to Plus" links, including the one on the marketing pricing page, should point at
+`<origin>/upgrade`. A signed-out visitor is sent through sign-in and brought back there.
+
 For a production deploy: run `npm run prisma:deploy` to apply migrations. On serverless hosts,
 set `DATABASE_PRISMA_DATABASE_URL` to a pooled connection URL (see `.env.example`), otherwise concurrent
 function instances can hit "too many connections" on the direct `DATABASE_URL`. `npm run

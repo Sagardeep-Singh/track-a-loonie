@@ -25,6 +25,7 @@ import { AddTransactionLink } from '@/components/transactions/add-transaction-li
 import { TransactionFiltersDialog } from '@/components/transactions/transaction-filters-dialog';
 import { MatchTransfersDialog } from '@/components/transactions/match-transfers-dialog';
 import { StatementPicker } from '@/components/transactions/period-picker';
+import { usePlan } from '@/components/billing/plan-provider';
 import { deleteJSON, getJSON, postJSON, type ApiFailure } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { listItemMotion } from '@/lib/motion/tokens';
@@ -246,6 +247,7 @@ export const TransactionsView = ({
   const selectedAccountId = filters.accountIds.length === 1 ? filters.accountIds[0] : null;
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
   const isCreditCard = selectedAccount?.type === 'CREDIT_CARD';
+  const statementCycles = usePlan().entitlements.features.statementCycles;
   const quickFilter = activeQuickFilter(filters);
 
   const openFiltersDialog = (): void => {
@@ -561,7 +563,7 @@ export const TransactionsView = ({
         </p>
       )}
 
-      {isCreditCard && (
+      {isCreditCard && statementCycles && (
         <div className="mt-3">
           {selectedAccount.statementDay ? (
             <StatementPicker

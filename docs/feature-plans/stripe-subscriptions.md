@@ -60,7 +60,7 @@ Locked with the owner:
   deleted or hidden. Existing records stay visible and editable, but creating new ones past a
   limit is refused and gated features turn off.
 
-Assumptions (confirm before implementation):
+Assumptions (all accepted by the owner):
 
 - **Billing is optional for self-hosters.** When `STRIPE_SECRET_KEY` is unset, billing UI is
   hidden and every user gets unlimited entitlements. Same pattern as Google sign-in being
@@ -81,11 +81,12 @@ Assumptions (confirm before implementation):
   (same month helpers as the period picker). Future-dated transactions stay visible.
 - **Data export is never limited.** It includes all history on every plan.
 - **CSV import of rows older than the window is allowed.** The rows save and count toward
-  balances but stay hidden until upgrade. The import summary says how many rows landed
-  outside the visible window.
+  balances but stay hidden until upgrade. (Follow-up, not in this change: have the import
+  summary say how many rows landed outside the visible window.)
 - **Downgrade behaviour per gated feature** (follows "read-only over limit"):
   - Accounts: keep all existing, block creating a third and up.
-  - Trends: page shows an upgrade prompt, API returns 402.
+  - Trends: page shows an upgrade prompt and `getSpendingTrends` refuses (there's no
+    trends API route).
   - Reimbursable expenses: existing flags and links keep counting in Overview math so
     past numbers don't shift; marking new ones and creating or editing links is refused.
     Removing a flag or link is still allowed.
@@ -96,9 +97,8 @@ Assumptions (confirm before implementation):
 
 ## Open questions
 
-- [ ] Does the settings data import (`/api/settings/import`) respect the account limit, or
-      is a restore always allowed? Suggest: refuse with a clear message when the file has
-      more accounts than the plan allows, so a restore can't be used to skip the limit.
+- [x] Does the settings data import respect the account limit? **Yes**, a restore whose file
+      has more accounts than the plan allows is refused before anything is wiped.
 - [x] Is "2 accounts" counted across all account types? **Yes**, every `Account` row counts,
       including off-budget and investment accounts.
 - [x] Does "Visible history" clamp the Categorize queue? **Yes**, transactions before the
@@ -106,8 +106,7 @@ Assumptions (confirm before implementation):
 - [x] Data export? **Always exports all transactions**, on every plan.
 - [x] Where does "Upgrade to Plus" go? **To an in-app page where the user enters payment
       details and the subscription is created** (see Subscribe below).
-- [ ] Should the bootstrap admin user get a permanent unlimited override? Suggest: no, keep
-      it a normal user.
+- [x] Bootstrap admin override? **No**, it's a normal user.
 
 ## Entitlements model
 
@@ -136,7 +135,32 @@ Stripe Product metadata uses flat keys: `limit_accounts=unlimited`, `history_mon
 so a typo never grants more than Free. `UNLIMITED_ENTITLEMENTS` is used when billing is
 disabled. New keys later only need a union member, a Free default and a metadata entry.
 
-## Schema changes (needs approval)
+## Implementation notes
+
+Where the build differs from the first draft of this plan:
+
+- **Free has no `Plan` row.** A user with no entitled subscription gets `FREE_ENTITLEMENTS`
+  straight from code, so `Plan` only holds paid plans and `stripeProductId` is required.
+  `isDefault` and `sortOrder` were dropped; plans sort by their cheapest price.
+- **Only Stripe products with `plan=true` metadata are synced**, so other products on the
+  same Stripe account are ignored.
+- **One error class, `PlanRestrictionError`** (`kind: 'limit' | 'feature'`), instead of two.
+  `planErrorResponse` in `lib/http/planError.ts` maps it to 402 with
+  `code: 'plan_limit' | 'plan_feature'`.
+- **`/upgrade` lives outside `(protected)`** (`app/upgrade/`), because the protected layout
+  redirects to a bare `/login`. The page does its own session check and sends a signed-out
+  visitor to `/login?next=/upgrade`. `next` is carried through sign-in, Google sign-in and
+  sign-up, and only `/upgrade` paths are honoured (`lib/auth/return-to.ts`).
+- **Stripe's embedded mode is `ui_mode: 'embedded_page'`** in the pinned SDK (23.x), and the
+  billing period end is read from the subscription item (`items.data[0].current_period_end`).
+- **Client components read the plan from `PlanProvider`** (protected layout), so the period
+  picker, account form, transaction form and settings don't need new props.
+- **No `/api/billing/plans` route**: the upgrade page reads `listPlans()` on the server.
+- **History clamp runs inside the services** (`getTransactionsPage`, `listTransactions`,
+  `getCategorizeQueue`, `getCategorizeQueueStats`, nav badge, `getOverviewData`) and in the
+  budgets page and budget month routes via `clampMonthToHistory`.
+
+## Schema changes (approved)
 
 ```prisma
 enum SubscriptionStatus {
@@ -152,12 +176,10 @@ enum SubscriptionStatus {
 
 model Plan {
   id              String   @id @default(cuid())
-  stripeProductId String?  @unique   // null for the Free plan
+  stripeProductId String   @unique
   name            String
   description     String?
-  isDefault       Boolean  @default(false) // exactly one: Free
   isActive        Boolean  @default(true)  // archived in Stripe = false
-  sortOrder       Int      @default(0)
   entitlements    Json                      // parsed Entitlements
   prices          PlanPrice[]
   subscriptions   Subscription[]
@@ -198,18 +220,17 @@ model StripeEvent {        // webhook idempotency
 
 `User` gets `stripeCustomerId String? @unique` and `subscription Subscription?`.
 
-The Free plan row is created by the migration (or an idempotent `ensureFreePlan` on boot) with
-its entitlements, so Free limits live in code and Git, not in Stripe.
+Free limits live in code (`FREE_ENTITLEMENTS`), not in a row or in Stripe.
 
 ## Request flows
 
 **Subscribe**
 
 1. "Upgrade to Plus" (marketing pricing page, billing settings, any `UpgradePrompt`) links
-   to `/upgrade?price=<stripePriceId>` in the app. The route is under `app/(protected)/`, so
-   a signed-out visitor goes through login or sign-up and comes back to it.
+   to `/upgrade` (optionally `?price=<stripePriceId>`) in the app. A signed-out visitor goes
+   through login or sign-up and comes back to it.
 2. The `/upgrade` page shows the plan summary (name, C$4/month, what's included) next to
-   **Stripe Embedded Checkout** (`ui_mode: 'embedded'`, `@stripe/stripe-js` +
+   **Stripe Embedded Checkout** (`ui_mode: 'embedded_page'`, `@stripe/stripe-js` +
    `@stripe/react-stripe-js`). The user enters card details on our page; Stripe handles
    the card form, 3-D Secure, Apple/Google Pay and SCA, so no card data touches our server
    and PCI scope stays at SAQ A.
@@ -300,9 +321,9 @@ key }` so the client can show an upgrade prompt.
   "Plus shows all your history" hint.
 - Account form hides or locks the statement day field on Free.
 - "Add account" shows the upgrade prompt once the user has 2.
-- `app/(protected)/upgrade/page.tsx` + `components/billing/embedded-checkout.tsx`: plan
+- `app/upgrade/page.tsx` + `components/billing/embedded-checkout-form.tsx`: plan
   summary and the embedded payment form, with loading, error and "already on Plus" states.
-- `app/(protected)/upgrade/complete/page.tsx`: success state ("You're on Plus") linking to
+- `app/upgrade/complete/page.tsx`: success state ("You're on Plus") linking to
   the dashboard, or the retry path.
 - `UpgradePrompt` shared component used wherever a 402 comes back (inline message with a
   link to billing), plus disabled states for gated nav items.
@@ -311,8 +332,7 @@ key }` so the client can show an upgrade prompt.
 ## Env vars
 
 Add to `.env.example`: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`,
-`NEXT_PUBLIC_APP_URL` (if not already derivable) for success and cancel URLs.
+`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`. The return URL reuses `appBaseUrl()`.
 
 New dependencies: `stripe` (server SDK, pin the API version in the client constructor),
 `@stripe/stripe-js` and `@stripe/react-stripe-js` (embedded form on the client).
@@ -337,15 +357,17 @@ Unit (`tests/unit/services/...`, Stripe client mocked):
   refuses when already subscribed. `getCheckoutResult`: rejects another user's session,
   upsert is idempotent with the webhook.
 
-E2E (`tests/e2e/billing.spec.ts`), billing env set to Stripe test mode with Checkout stubbed
-or a seeded subscription row:
+E2E (`tests/e2e/billing.spec.ts`). The suite's single dev server runs with billing off (the
+other specs rely on every feature being on), so e2e covers that posture plus the sign-in
+return path:
 
-- Free user with 2 accounts sees the upgrade prompt on "Add account".
-- Free user sees Trends locked and can't pick a month older than 12 months.
-- Seeded paid user can create past the Free limit.
-- `/upgrade` renders the embedded form for a Free user, redirects a signed-out visitor to
-  login and back, and sends a Plus user to billing instead.
-- Billing page shows plan and status; hidden when billing is disabled.
+- A signed-out visitor sent to `/upgrade` signs up, signs in and lands back on it.
+- A `next` outside the allowlist is ignored.
+- With billing off there's no Plan card, Trends isn't locked and a third account is allowed.
+
+The Free limits themselves are covered by unit tests (`plan-gates.test.ts`,
+`entitlements.test.ts`). Follow-up: a second Playwright project with billing on and a seeded
+`Subscription` row would let e2e cover the Free prompts too.
 
 Manual: Stripe CLI `stripe listen --forward-to localhost:3000/api/stripe/webhook` with a test
 card through the full subscribe, switch, cancel flow.
@@ -353,28 +375,26 @@ card through the full subscribe, switch, cancel flow.
 ## Checklist
 
 - [x] Get the restriction list from the owner's screenshots
-- [ ] Confirm assumptions and open questions above
-- [ ] Get schema change approval
-- [ ] Add `stripe` dependency, `lib/billing/stripe.ts` client singleton, env vars
-- [ ] Schema + migration (`Plan`, `PlanPrice`, `Subscription`, `StripeEvent`,
-      `User.stripeCustomerId`), seed the Free plan
-- [ ] `lib/billing/entitlements.ts` types, Zod metadata parser, unlimited constant
-- [ ] `lib/services/billing.ts`: `listPlans`, `getBillingSummary`, `createCheckoutSession`,
+- [x] Confirm assumptions and open questions above
+- [x] Get schema change approval
+- [x] Add `stripe` dependency, `lib/billing/stripe.ts` client singleton, env vars
+- [x] Schema + migration (`Plan`, `PlanPrice`, `Subscription`, `StripeEvent`,
+      `User.stripeCustomerId`)
+- [x] `lib/billing/entitlements.ts` types, Zod metadata parser, unlimited constant
+- [x] `lib/services/billing.ts`: `listPlans`, `getBillingSummary`, `createCheckoutSession`,
       `getCheckoutResult`, `createPortalSession`, `handleStripeEvent`, `cancelSubscriptionForDeletion`
-- [ ] `lib/services/entitlements.ts`: `getEntitlements`, `assertCanCreate`, `assertFeature`,
+- [x] `lib/services/entitlements.ts`: `getEntitlements`, `assertCanCreate`, `assertFeature`,
       `getHistoryFloor`
-- [ ] `PlanLimitError` / `PlanFeatureError` in `lib/services/common.ts` and 402 mapping in
-      `lib/http`
-- [ ] Routes: `/api/billing/checkout`, `/api/billing/portal`, `/api/billing/plans`,
-      `/api/stripe/webhook`
-- [ ] `stripe:sync-plans` script
-- [ ] Gate accounts (`createAccount`, data import)
-- [ ] Gate trends, reimbursements, statement cycles, push reminders (incl. cron filter)
-- [ ] Apply history floor to transactions, overview, budgets, ZBB, categorize, period picker
-- [ ] Hook subscription cancel into `accountDeletion.ts`
-- [ ] `/upgrade` page with Embedded Checkout and `/upgrade/complete`
-- [ ] Billing settings page, plan cards, `UpgradePrompt`, gated nav states
-- [ ] Point the marketing site's "Upgrade to Plus" button at `/upgrade`
-- [ ] Unit tests and e2e spec
-- [ ] README: Stripe setup steps (products, metadata keys, webhook endpoint, portal config)
-- [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
+- [x] `PlanRestrictionError` in `lib/services/common.ts` and 402 mapping in `lib/http`
+- [x] Routes: `/api/billing/checkout`, `/api/billing/portal`, `/api/stripe/webhook`
+- [x] `stripe:sync-plans` script
+- [x] Gate accounts (`createAccount`, data restore)
+- [x] Gate trends, reimbursements, statement cycles, push reminders (incl. cron filter)
+- [x] Apply history floor to transactions, overview, budgets, ZBB, categorize, period picker
+- [x] Hook subscription cancel into `accountDeletion.ts`
+- [x] `/upgrade` page with Embedded Checkout and `/upgrade/complete`
+- [x] Plan card in Settings, `UpgradePrompt`, gated form fields and picker months
+- [ ] Point the marketing site's "Upgrade to Plus" button at `/upgrade` (outside this repo)
+- [x] Unit tests and e2e spec
+- [x] README: Stripe setup steps (products, metadata keys, webhook endpoint, portal config)
+- [x] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`

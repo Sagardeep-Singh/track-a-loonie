@@ -1,6 +1,7 @@
 import { monthRange, toDateKey } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { rangeToDates, type DateRange } from '@/lib/period-selection';
+import { clampRangeToHistory, getHistoryFloor } from '@/lib/services/entitlements';
 
 export type CategoryRuleMatcher = { categoryId: string; matchText: string; priority: number };
 
@@ -58,7 +59,7 @@ export const getCategorizeQueue = async (
   userId: string,
   range: DateRange = { from: null, to: null },
 ): Promise<CategorizeQueueRow[]> => {
-  const date = rangeToDates(range);
+  const date = rangeToDates(await clampRangeToHistory(userId, range));
   const rules = await prisma.categoryRule.findMany({
     where: { userId },
     include: { category: { select: { name: true } } },
@@ -99,6 +100,7 @@ export const getCategorizeQueue = async (
 export type CategorizeQueueStats = { total: number; matched: number };
 
 export const getCategorizeQueueStats = async (userId: string): Promise<CategorizeQueueStats> => {
+  const floor = await getHistoryFloor(userId);
   const [rules, uncategorized] = await Promise.all([
     prisma.categoryRule.findMany({
       where: { userId },
@@ -107,7 +109,14 @@ export const getCategorizeQueueStats = async (userId: string): Promise<Categoriz
     prisma.transaction.findMany({
       // a transfer leg or a card payment isn't spending or income — it never
       // needs a category, so keep it out of the triage queue entirely
-      where: { userId, categoryId: null, skippedAt: null, isTransfer: false, isPayment: false },
+      where: {
+        userId,
+        categoryId: null,
+        skippedAt: null,
+        isTransfer: false,
+        isPayment: false,
+        ...(floor ? { date: { gte: floor } } : {}),
+      },
       select: { payee: true, note: true },
     }),
   ]);

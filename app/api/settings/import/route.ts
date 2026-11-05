@@ -3,6 +3,7 @@ import { requireUserId } from '@/lib/auth/session';
 import { MAX_IMPORT_BYTES, userDataFileSchema } from '@/lib/validators/user-data';
 import { importUserData } from '@/lib/services/userData';
 import { ServiceValidationError } from '@/lib/services/common';
+import { planErrorResponse } from '@/lib/http/planError';
 
 export const maxDuration = 60;
 
@@ -48,6 +49,8 @@ export const POST = async (request: Request): Promise<NextResponse> => {
     const result = await importUserData(userId, parsed.data);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
+    const planError = planErrorResponse(error);
+    if (planError) return planError;
     if (error instanceof ServiceValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

@@ -9,6 +9,8 @@ import { listCategories } from '@/lib/services/categories';
 import { getNavCounts } from '@/lib/services/nav';
 import { getEmailVerificationStatus } from '@/lib/services/emailVerification';
 import { UnverifiedEmailBanner } from '@/components/nav/unverified-email-banner';
+import { getEntitlements, getHistoryFloorMonth } from '@/lib/services/entitlements';
+import { PlanProvider } from '@/components/billing/plan-provider';
 
 const ProtectedLayout = async ({
   children,
@@ -20,27 +22,34 @@ const ProtectedLayout = async ({
     redirect('/login');
   }
 
-  const [accounts, categories, counts, emailVerification] = await Promise.all([
-    listAccounts(session.user.id),
-    listCategories(session.user.id),
-    getNavCounts(session.user.id),
-    getEmailVerificationStatus(session.user.id),
-  ]);
+  const [accounts, categories, counts, emailVerification, entitlements, historyFloorMonth] =
+    await Promise.all([
+      listAccounts(session.user.id),
+      listCategories(session.user.id),
+      getNavCounts(session.user.id),
+      getEmailVerificationStatus(session.user.id),
+      getEntitlements(session.user.id),
+      getHistoryFloorMonth(session.user.id),
+    ]);
 
   return (
-    <div className="bg-paper flex min-h-screen">
-      <Sidebar accounts={accounts} counts={counts} />
-      <main className="min-w-0 flex-1 px-5 pt-8.5 pb-[calc(60px+env(safe-area-inset-bottom)+24px)] lg:px-10 lg:pb-14">
-        <div className="mx-auto max-w-none lg:max-w-[1120px]">
-          {emailVerification.configured && !emailVerification.verified && <UnverifiedEmailBanner />}
-          {children}
-        </div>
-      </main>
-      <BottomNav counts={counts} />
-      <Suspense fallback={null}>
-        <AddTransactionOverlay accounts={accounts} categories={categories} />
-      </Suspense>
-    </div>
+    <PlanProvider value={{ entitlements, historyFloorMonth }}>
+      <div className="bg-paper flex min-h-screen">
+        <Sidebar accounts={accounts} counts={counts} />
+        <main className="min-w-0 flex-1 px-5 pt-8.5 pb-[calc(60px+env(safe-area-inset-bottom)+24px)] lg:px-10 lg:pb-14">
+          <div className="mx-auto max-w-none lg:max-w-[1120px]">
+            {emailVerification.configured && !emailVerification.verified && (
+              <UnverifiedEmailBanner />
+            )}
+            {children}
+          </div>
+        </main>
+        <BottomNav counts={counts} />
+        <Suspense fallback={null}>
+          <AddTransactionOverlay accounts={accounts} categories={categories} />
+        </Suspense>
+      </div>
+    </PlanProvider>
   );
 };
 

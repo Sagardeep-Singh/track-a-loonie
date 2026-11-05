@@ -6,11 +6,12 @@ import { signUpAction } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
 
-export const SignUpForm = (): React.ReactElement => {
+export const SignUpForm = ({ next }: { next?: string }): React.ReactElement => {
   const [error, formAction, pending] = useActionState(signUpAction, undefined);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {next && <input type="hidden" name="next" value={next} />}
       <div>
         <Label htmlFor="name">Name</Label>
         <Input

@@ -8,6 +8,7 @@ import {
 import { createTransaction, listTransactions } from '@/lib/services/transactions';
 import { getTransactionsPage, toTransactionsPageRequest } from '@/lib/services/transactionsPage';
 import { ReimbursementConflictError, ServiceValidationError } from '@/lib/services/common';
+import { planErrorResponse } from '@/lib/http/planError';
 
 export const GET = async (request: Request): Promise<NextResponse> => {
   const userId = await requireUserId();
@@ -48,6 +49,8 @@ const getPaginated = async (userId: string, params: URLSearchParams): Promise<Ne
       await getTransactionsPage(userId, toTransactionsPageRequest(parsed.data)),
     );
   } catch (error) {
+    const planError = planErrorResponse(error);
+    if (planError) return planError;
     if (error instanceof ServiceValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
@@ -70,6 +73,8 @@ export const POST = async (request: Request): Promise<NextResponse> => {
     const transaction = await createTransaction(userId, parsed.data);
     return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
+    const planError = planErrorResponse(error);
+    if (planError) return planError;
     if (error instanceof ReimbursementConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

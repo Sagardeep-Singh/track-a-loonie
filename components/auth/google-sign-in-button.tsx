@@ -22,11 +22,15 @@ const GoogleGlyph = (): React.ReactElement => (
 export const GoogleSignInButton = ({
   label,
   action = signInWithGoogleAction,
+  next,
 }: {
   label: string;
-  action?: () => Promise<void>;
+  action?: (formData: FormData) => Promise<void>;
+  /** where to land after sign-in; checked again server-side */
+  next?: string;
 }): React.ReactElement => (
   <form action={action}>
+    {next && <input type="hidden" name="next" value={next} />}
     <Button type="submit" variant="secondary" className="w-full">
       <GoogleGlyph />
       {label}

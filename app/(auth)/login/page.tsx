@@ -4,6 +4,7 @@ import { LoginForm } from '@/components/auth/login-form';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { isPasswordResetConfigured } from '@/lib/services/passwordReset';
 import { AuthAside } from '@/components/auth/auth-aside';
+import { nextQuery } from '@/lib/auth/return-to';
 
 const googleConfigured = Boolean(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
 
@@ -32,9 +33,12 @@ const LoginPage = async ({
     passwordReset?: string;
     verify?: string;
     signup?: string;
+    next?: string;
   }>;
 }): Promise<React.ReactElement> => {
-  const { passwordChanged, passwordReset, verify, signup } = await searchParams;
+  const { passwordChanged, passwordReset, verify, signup, next: rawNext } = await searchParams;
+  // only an allowlisted path survives (see safeReturnTo)
+  const next = nextQuery(rawNext) ? rawNext : undefined;
   const verifyMessage = verify ? VERIFY_MESSAGES[verify] : undefined;
   const signupMessage = signup ? SIGNUP_MESSAGES[signup] : undefined;
 
@@ -70,7 +74,7 @@ const LoginPage = async ({
               {verifyMessage.text}
             </p>
           )}
-          <LoginForm />
+          <LoginForm next={next} />
           {isPasswordResetConfigured() && (
             <p className="mt-3 text-right text-[13px]">
               <Link href="/forgot-password" className="text-iris font-medium">
@@ -85,12 +89,12 @@ const LoginPage = async ({
                 or
                 <span className="bg-line h-px flex-1" />
               </div>
-              <GoogleSignInButton label="Continue with Google" />
+              <GoogleSignInButton label="Continue with Google" next={next} />
             </>
           )}
           <p className="text-ink-muted mt-6 text-center text-[13.5px]">
             New here?{' '}
-            <Link href="/signup" className="text-iris font-medium">
+            <Link href={`/signup${nextQuery(next)}`} className="text-iris font-medium">
               Create an account
             </Link>
           </p>

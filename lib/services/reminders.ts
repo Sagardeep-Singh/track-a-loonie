@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
+import { assertFeature, filterUsersWithFeature } from '@/lib/services/entitlements';
 import { isPushConfigured, sendPush } from '@/lib/push/webPush';
 import {
   listPushTargets,
@@ -124,6 +125,7 @@ export const updateReminderPreference = async (
   userId: string,
   input: UpdateReminderPreferenceInput,
 ): Promise<FrontendReminderPreference> => {
+  if (input.enabled) await assertFeature(userId, 'pushReminders');
   const existing = await prisma.notificationPreference.findUnique({ where: { userId } });
   const reOptingIn = existing !== null && !existing.enabled && input.enabled;
 
@@ -248,7 +250,13 @@ export const sendDueReminders = async (now: Date): Promise<SendDueRemindersSumma
     return summary;
   }
 
-  const prefs = await prisma.notificationPreference.findMany({ where: { enabled: true } });
+  const enabledPrefs = await prisma.notificationPreference.findMany({ where: { enabled: true } });
+  // a downgraded user keeps their preference and devices, so reminders resume on upgrade
+  const entitled = await filterUsersWithFeature(
+    enabledPrefs.map((pref) => pref.userId),
+    'pushReminders',
+  );
+  const prefs = enabledPrefs.filter((pref) => entitled.has(pref.userId));
   summary.evaluated = prefs.length;
   if (prefs.length === 0) {
     return summary;

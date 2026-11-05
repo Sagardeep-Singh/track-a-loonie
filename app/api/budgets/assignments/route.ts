@@ -3,6 +3,7 @@ import { requireUserId } from '@/lib/auth/session';
 import { setAssignmentSchema, zbbMonthQuerySchema } from '@/lib/validators/zero-based';
 import { getZbbMonth, setAssignment } from '@/lib/services/zeroBased';
 import { ServiceValidationError } from '@/lib/services/common';
+import { clampMonthToHistory } from '@/lib/services/entitlements';
 
 export const PUT = async (request: Request): Promise<NextResponse> => {
   const userId = await requireUserId();
@@ -39,7 +40,8 @@ export const GET = async (request: Request): Promise<NextResponse> => {
   }
 
   try {
-    return NextResponse.json(await getZbbMonth(userId, parsed.data.month));
+    const month = await clampMonthToHistory(userId, parsed.data.month);
+    return NextResponse.json(await getZbbMonth(userId, month));
   } catch (error) {
     if (error instanceof ServiceValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });

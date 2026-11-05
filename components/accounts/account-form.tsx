@@ -13,6 +13,8 @@ import {
   defaultOnBudgetFor,
 } from '@/lib/account-types';
 import { patchJSON, postJSON } from '@/lib/api-client';
+import { UpgradePrompt } from '@/components/billing/upgrade-prompt';
+import { usePlan } from '@/components/billing/plan-provider';
 import type { FrontendAccount } from '@/lib/services/accounts';
 
 export const AccountForm = ({
@@ -26,6 +28,8 @@ export const AccountForm = ({
   zeroBased?: boolean;
 }): React.ReactElement => {
   const router = useRouter();
+  const { entitlements } = usePlan();
+  const statementCycles = entitlements.features.statementCycles;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [type, setType] = useState(account?.type ?? 'CHECKING');
@@ -44,7 +48,13 @@ export const AccountForm = ({
       name: form.get('name'),
       type: form.get('type'),
       startingBalance: form.get('startingBalance'),
-      statementDay: type === 'CREDIT_CARD' ? form.get('statementDay') || null : null,
+      // without the feature the field is hidden: leave a stored day alone rather than clear it
+      statementDay:
+        type !== 'CREDIT_CARD'
+          ? null
+          : statementCycles
+            ? form.get('statementDay') || null
+            : undefined,
       onBudget,
     };
 
@@ -54,7 +64,11 @@ export const AccountForm = ({
 
     setPending(false);
     if (!res.ok) {
-      setError('Could not save this account. Check the fields and try again.');
+      setError(
+        res.status === 402 && res.error
+          ? res.error
+          : 'Could not save this account. Check the fields and try again.',
+      );
       return;
     }
 
@@ -90,7 +104,10 @@ export const AccountForm = ({
           defaultValue={account?.startingBalance ?? '0'}
         />
       </div>
-      {type === 'CREDIT_CARD' && (
+      {type === 'CREDIT_CARD' && !statementCycles && (
+        <UpgradePrompt compact title="Credit card statement cycles are part of Plus." />
+      )}
+      {type === 'CREDIT_CARD' && statementCycles && (
         <div>
           <Label htmlFor="statementDay">Statement closes on (day of month)</Label>
           <Input

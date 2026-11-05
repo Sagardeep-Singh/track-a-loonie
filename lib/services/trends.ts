@@ -1,5 +1,6 @@
 import { monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
+import { assertFeature } from '@/lib/services/entitlements';
 import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
 import { getGoalEffects } from '@/lib/services/savingsGoals';
 import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
@@ -79,6 +80,7 @@ export const getSpendingTrends = async (
   userId: string,
   options: { month?: number; range?: TrendsRange } = {},
 ): Promise<SpendingTrendsData> => {
+  await assertFeature(userId, 'trends');
   const range = options.range ?? 3;
   const endMonth = options.month ?? currentMonth();
   const currentMonths = monthsEnding(endMonth, range);

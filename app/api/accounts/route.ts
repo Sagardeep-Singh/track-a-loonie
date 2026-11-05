@@ -3,6 +3,7 @@ import { requireUserId } from '@/lib/auth/session';
 import { createAccountSchema } from '@/lib/validators/accounts';
 import { createAccount, listAccounts } from '@/lib/services/accounts';
 import { ServiceValidationError } from '@/lib/services/common';
+import { planErrorResponse } from '@/lib/http/planError';
 
 export const GET = async (): Promise<NextResponse> => {
   const userId = await requireUserId();
@@ -29,6 +30,8 @@ export const POST = async (request: Request): Promise<NextResponse> => {
     const account = await createAccount(userId, parsed.data);
     return NextResponse.json(account, { status: 201 });
   } catch (error) {
+    const planError = planErrorResponse(error);
+    if (planError) return planError;
     if (error instanceof ServiceValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

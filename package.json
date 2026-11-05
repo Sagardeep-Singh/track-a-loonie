@@ -19,12 +19,15 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:bootstrap-admin": "tsx prisma/bootstrap-admin.ts",
+    "stripe:sync-plans": "tsx prisma/stripe-sync-plans.ts",
     "prisma:seed:dev": "tsx prisma/seed.ts",
     "db:setup": "npm run prisma:generate && npm run prisma:migrate -- --name init && npm run prisma:seed:dev"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
     "@prisma/client": "^6.19.3",
+    "@stripe/react-stripe-js": "^7.0.1",
+    "@stripe/stripe-js": "^10.2.1",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "bcryptjs": "^3.0.3",
@@ -36,6 +39,7 @@
     "prisma": "^6.19.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "stripe": "^23.1.0",
     "web-push": "^3.6.7",
     "zod": "^4.5.4"
   },

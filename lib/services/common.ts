@@ -58,3 +58,21 @@ export class GoogleReauthRequiredError extends Error {
     this.name = 'GoogleReauthRequiredError';
   }
 }
+
+/**
+ * A write was refused because the user's plan doesn't allow it: a count limit
+ * (`kind: 'limit'`) or a Plus-only feature (`kind: 'feature'`). Subclasses
+ * ServiceValidationError so every existing 400 mapping still catches it;
+ * gated routes check it first and answer 402 via `planErrorResponse`, whose
+ * `code` the client uses to offer the upgrade.
+ */
+export class PlanRestrictionError extends ServiceValidationError {
+  constructor(
+    message: string,
+    public readonly kind: 'limit' | 'feature',
+    public readonly key: string,
+  ) {
+    super(message);
+    this.name = 'PlanRestrictionError';
+  }
+}

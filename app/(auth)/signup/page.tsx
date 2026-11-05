@@ -3,13 +3,20 @@ import { SignUpForm } from '@/components/auth/signup-form';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { LogoMark } from '@/components/ui/logo-mark';
 import { Ring } from '@/components/ui/ring';
+import { nextQuery } from '@/lib/auth/return-to';
 
 // Forced dynamic so `googleConfigured` is read per-request, not baked into a
 // static build — otherwise adding AUTH_GOOGLE_ID/SECRET later would need a
 // rebuild for the button to appear.
 export const dynamic = 'force-dynamic';
 
-const SignUpPage = (): React.ReactElement => {
+const SignUpPage = async ({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}): Promise<React.ReactElement> => {
+  const { next: rawNext } = await searchParams;
+  const next = nextQuery(rawNext) ? rawNext : undefined;
   const googleConfigured = Boolean(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
 
   return (
@@ -39,7 +46,7 @@ const SignUpPage = (): React.ReactElement => {
             Create your account
           </h2>
           <p className="text-ink-muted mt-2 mb-6.5 text-[13.5px]">Free — takes a minute.</p>
-          <SignUpForm />
+          <SignUpForm next={next} />
           {googleConfigured && (
             <>
               <div className="text-ink-muted my-5 flex items-center gap-3 text-xs">
@@ -47,12 +54,12 @@ const SignUpPage = (): React.ReactElement => {
                 or
                 <span className="bg-line h-px flex-1" />
               </div>
-              <GoogleSignInButton label="Continue with Google" />
+              <GoogleSignInButton label="Continue with Google" next={next} />
             </>
           )}
           <p className="text-ink-muted mt-6 text-center text-[13.5px]">
             Already have an account?{' '}
-            <Link href="/login" className="text-iris font-medium">
+            <Link href={`/login${nextQuery(next)}`} className="text-iris font-medium">
               Sign in
             </Link>
           </p>

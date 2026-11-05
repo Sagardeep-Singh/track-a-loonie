@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Calendar, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -7,6 +8,7 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
 import { cn } from '@/lib/cn';
+import { usePlan } from '@/components/billing/plan-provider';
 import {
   parseDateParam,
   periodSelectionLabel,
@@ -51,6 +53,7 @@ const PeriodPickerBody = ({
   allowCustom,
   customDraft,
   onCustomDraftChange,
+  floorMonth,
 }: {
   selection: PeriodSelection;
   now: number;
@@ -61,12 +64,19 @@ const PeriodPickerBody = ({
   allowCustom: boolean;
   customDraft: { from: string; to: string };
   onCustomDraftChange: (draft: { from: string; to: string }) => void;
+  /** oldest month the plan can browse; null = all history */
+  floorMonth: number | null;
 }): React.ReactElement => {
   // The body renders twice (anchored popover + the hidden mobile sheet), so
   // input ids must be per instance for each label to find its own input.
   const idPrefix = useId();
   const selectedMonth = selection.kind === 'month' ? selection.month : null;
   const lastMonth = shiftMonth(now, -1);
+  const beforeFloor = (m: number): boolean => floorMonth !== null && m < floorMonth;
+  const floorDate =
+    floorMonth === null
+      ? undefined
+      : `${Math.floor(floorMonth / 100)}-${String(floorMonth % 100).padStart(2, '0')}-01`;
   const customInvalid =
     (!customDraft.from && !customDraft.to) ||
     (!!customDraft.from && !!customDraft.to && customDraft.from > customDraft.to);
@@ -102,7 +112,8 @@ const PeriodPickerBody = ({
           type="button"
           onClick={onPrevYear}
           aria-label="Previous year"
-          className="text-ink-muted hover:text-ink -ml-2 flex size-9 items-center justify-center"
+          disabled={floorMonth !== null && (viewYear - 1) * 100 + 12 < floorMonth}
+          className="text-ink-muted hover:text-ink -ml-2 flex size-9 items-center justify-center disabled:opacity-30"
         >
           <ChevronLeft size={16} />
         </button>
@@ -122,8 +133,9 @@ const PeriodPickerBody = ({
             key={m}
             type="button"
             onClick={() => onSelect({ kind: 'month', month: m })}
+            disabled={beforeFloor(m)}
             className={cn(
-              'rounded-[10px] py-2.5 text-[13px] font-medium',
+              'rounded-[10px] py-2.5 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-35',
               m === selectedMonth ? 'bg-iris text-paper-raised' : 'text-ink hover:bg-paper',
             )}
           >
@@ -131,6 +143,14 @@ const PeriodPickerBody = ({
           </button>
         ))}
       </div>
+      {floorMonth !== null && (
+        <p className="text-ink-muted mt-3 text-[12px]">
+          Older months are part of Plus.{' '}
+          <Link href="/upgrade" className="text-iris font-medium">
+            Upgrade
+          </Link>
+        </p>
+      )}
       {allowCustom && (
         <form
           className="border-line mt-5 border-t pt-4"
@@ -155,6 +175,7 @@ const PeriodPickerBody = ({
               id={`${idPrefix}-from`}
               aria-label="From"
               type="date"
+              min={floorDate}
               value={customDraft.from}
               onChange={(e) => onCustomDraftChange({ ...customDraft, from: e.target.value })}
               className="w-full min-w-0"
@@ -166,6 +187,7 @@ const PeriodPickerBody = ({
               id={`${idPrefix}-to`}
               aria-label="To"
               type="date"
+              min={floorDate}
               value={customDraft.to}
               onChange={(e) => onCustomDraftChange({ ...customDraft, to: e.target.value })}
               className="w-full min-w-0"
@@ -203,6 +225,7 @@ export const PeriodSelector = ({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const now = currentMonth();
+  const { historyFloorMonth } = usePlan();
   const anchorMonth =
     selection.kind === 'month'
       ? selection.month
@@ -249,6 +272,7 @@ export const PeriodSelector = ({
       allowCustom={allowCustom}
       customDraft={customDraft}
       onCustomDraftChange={setCustomDraft}
+      floorMonth={historyFloorMonth}
     />
   );
 

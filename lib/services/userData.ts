@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { defaultOnBudgetFor } from '@/lib/account-types';
 import { prisma } from '@/lib/db/prisma';
+import { assertTotalWithinLimit } from '@/lib/services/entitlements';
 import { spreadEndMonth } from '@/lib/spread';
 import { USER_DATA_FORMAT_VERSION, type UserDataFile } from '@/lib/validators/user-data';
 
@@ -297,6 +298,8 @@ export const importUserData = async (
   file: UserDataFile,
 ): Promise<ImportUserDataResult> => {
   const { data } = file;
+  // the restore replaces everything, so only the file's own accounts count
+  await assertTotalWithinLimit(userId, 'accounts', data.accounts.length);
 
   const accountIds = new Map(data.accounts.map((a) => [a.id, randomUUID()]));
   const categoryIds = new Map(data.categories.map((c) => [c.id, randomUUID()]));

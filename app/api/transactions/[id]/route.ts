@@ -3,6 +3,7 @@ import { requireUserId } from '@/lib/auth/session';
 import { updateTransactionSchema } from '@/lib/validators/transactions';
 import { deleteTransaction, updateTransaction } from '@/lib/services/transactions';
 import { ReimbursementConflictError, ServiceValidationError } from '@/lib/services/common';
+import { planErrorResponse } from '@/lib/http/planError';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -21,6 +22,8 @@ export const PATCH = async (request: Request, { params }: RouteParams): Promise<
   try {
     return NextResponse.json(await updateTransaction(userId, id, parsed.data));
   } catch (error) {
+    const planError = planErrorResponse(error);
+    if (planError) return planError;
     if (error instanceof ReimbursementConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
@@ -42,6 +45,8 @@ export const DELETE = async (_request: Request, { params }: RouteParams): Promis
     await deleteTransaction(userId, id);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
+    const planError = planErrorResponse(error);
+    if (planError) return planError;
     if (error instanceof ReimbursementConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

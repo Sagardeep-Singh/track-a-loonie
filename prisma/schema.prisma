@@ -49,20 +49,34 @@ enum BudgetMode {
   ZERO_BASED
 }
 
+/// mirrors Stripe's subscription.status
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  UNPAID
+  CANCELED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  PAUSED
+}
+
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String?
+  id               String    @id @default(cuid())
+  email            String    @unique
+  name             String?
   /// nullable: users who sign up via Google have no password
-  passwordHash String?
+  passwordHash     String?
   /// null = unverified. Google sign-up sets this immediately (Google already
   /// verified the address); credentials sign-up leaves it null until the
   /// emailed link is clicked. Never gates access — see
   /// lib/services/emailVerification.ts and the 2026-09-17 codebase review's
   /// "Signup has no email verification" finding for the accepted-risk
   /// reasoning behind that choice.
-  emailVerified DateTime?
-  createdAt     DateTime  @default(now())
+  emailVerified    DateTime?
+  createdAt        DateTime  @default(now())
+  /// set the first time the user opens checkout; reused for every later one
+  stripeCustomerId String?   @unique
 
   accounts           Account[]
   categories         Category[]
@@ -80,6 +94,7 @@ model User {
   savingsGoals           SavingsGoal[]
   emailVerificationToken EmailVerificationToken?
   passwordResetToken     PasswordResetToken?
+  subscription           Subscription?
 }
 
 /// One row per user, replaced (not appended) on every (re)send — sending a
@@ -140,7 +155,7 @@ model Category {
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions  Transaction[]
   budgets       Budget[]
   categoryRules CategoryRule[]
@@ -151,57 +166,57 @@ model Category {
 }
 
 model Transaction {
-  id            String          @id @default(cuid())
-  userId        String
-  accountId     String
-  categoryId    String?
-  amount        Decimal         @db.Decimal(12, 2)
-  type          TransactionType
-  date          DateTime
-  payee         String?
-  note          String?
-  importBatchId String?
+  id                          String          @id @default(cuid())
+  userId                      String
+  accountId                   String
+  categoryId                  String?
+  amount                      Decimal         @db.Decimal(12, 2)
+  type                        TransactionType
+  date                        DateTime
+  payee                       String?
+  note                        String?
+  importBatchId               String?
   /// marks an INCOME transaction on a credit card account as a payment toward
   /// the previous statement's balance, so it's excluded from the current
   /// statement period's credit/debit/net totals
-  isPayment     Boolean         @default(false)
+  isPayment                   Boolean         @default(false)
   /// marks one leg of a transfer between two of the user's own accounts (e.g.
   /// the checking-side EXPENSE and the card-side INCOME of a card payment), so
   /// neither leg is counted as real income or spending in any aggregate
-  isTransfer    Boolean         @default(false)
+  isTransfer                  Boolean         @default(false)
   /// soft correlation id shared by both legs of one matched transfer pair; not
   /// a foreign key — it exists for display, debugging, and future unlinking
-  transferMatchId String?
+  transferMatchId             String?
   /// marks an EXPENSE the user expects to be paid back for (work expense, split
   /// bill). Mutually exclusive with isTransfer/isPayment. Invariant:
   /// isReimbursable === true <=> reimbursementExpectedAmount !== null
-  isReimbursable  Boolean         @default(false)
+  isReimbursable              Boolean         @default(false)
   /// how much of this expense is expected back; <= amount. equal = fully
   /// reimbursable, less = partially. null when !isReimbursable
-  reimbursementExpectedAmount Decimal? @db.Decimal(12, 2)
+  reimbursementExpectedAmount Decimal?        @db.Decimal(12, 2)
   /// set only by the manual "mark fully reimbursed" override. A derived COMPLETE
   /// (linked total >= expected) reverts to PARTIAL/PENDING if links shrink; a
   /// manual one only reverts when the user explicitly un-marks it
-  reimbursementCompletedAt DateTime?
+  reimbursementCompletedAt    DateTime?
   /// first YYYYMM month (same idiom as Budget.month) this EXPENSE's cost is
   /// spread over for reporting. Invariant: all three spread* columns are set
   /// together or all null. Only budgets/overview/trends read them; the ledger,
   /// balances and the Transactions page keep using amount/date as-is.
   /// Mutually exclusive with isTransfer/isPayment/isReimbursable.
-  spreadStartMonth Int?
+  spreadStartMonth            Int?
   /// number of months (2-24) the amount is split evenly across, remainder
   /// cents going to the earliest months. null when not spread
-  spreadMonths     Int?
+  spreadMonths                Int?
   /// last YYYYMM month of the spread, denormalized from start + months so an
   /// overlap query can use plain integer comparisons (YYYYMM isn't linear)
-  spreadEndMonth   Int?
-  skippedAt     DateTime?
-  createdAt     DateTime        @default(now())
+  spreadEndMonth              Int?
+  skippedAt                   DateTime?
+  createdAt                   DateTime        @default(now())
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  importBatch ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  user                      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account                   Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category                  Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  importBatch               ImportBatch?        @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
   reimbursementExpenseLinks ReimbursementLink[] @relation("ReimbursementExpense")
   reimbursementIncomeLinks  ReimbursementLink[] @relation("ReimbursementIncome")
 
@@ -381,19 +396,19 @@ model NotificationPreference {
 /// no backfill migration is needed. Deliberately excluded from data export
 /// (see lib/services/userData.ts) and preserved across data import.
 model UserAiSettings {
-  id       String     @id @default(cuid())
-  userId   String     @unique
-  provider AiProvider
+  id                   String     @id @default(cuid())
+  userId               String     @unique
+  provider             AiProvider
   /// AES-256-GCM ciphertext of the provider API key, packed as
   /// "v1:<iv-b64>:<tag-b64>:<ciphertext-b64>" by lib/crypto/secrets.ts.
   /// Never returned by any service, never logged, never exported.
-  encryptedApiKey String
+  encryptedApiKey      String
   /// last 4 chars of the plaintext key, stored separately so Settings can
   /// render "sk-…a1b2" without ever decrypting. Display-only.
-  keyLast4        String
+  keyLast4             String
   /// set when a probe call to the provider last succeeded. null means the key
   /// was persisted during a provider outage and is unverified.
-  verifiedAt      DateTime?
+  verifiedAt           DateTime?
   /// provider model id the user picked for suggestions (e.g.
   /// "claude-3-5-haiku-latest", "gpt-4o-mini"). Saving a key or switching
   /// provider rewrites this column in the same write, so it starts out
@@ -404,11 +419,11 @@ model UserAiSettings {
   /// suggest call rather than being validated here. null = not yet picked:
   /// the next successful models-list fetch backfills it with the first entry.
   /// Existing rows start null, so no backfill migration is needed.
-  modelId         String?
+  modelId              String?
   /// opt-in: include Transaction.note in the prompt. Default off.
-  sendNote        Boolean   @default(false)
+  sendNote             Boolean    @default(false)
   /// opt-in: include Transaction.amount in the prompt. Default off.
-  sendAmount      Boolean   @default(false)
+  sendAmount           Boolean    @default(false)
   /// set the first time the user acknowledges the data-disclosure panel;
   /// the suggest endpoint refuses to run while null.
   disclosureAcceptedAt DateTime?
@@ -417,9 +432,9 @@ model UserAiSettings {
   suggestCountDate     Int?
   /// suggest calls made on suggestCountDate. DB-backed because serverless is
   /// multi-instance: an in-memory limiter would not limit.
-  suggestCount         Int      @default(0)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  suggestCount         Int        @default(0)
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -480,4 +495,63 @@ model CategoryRule {
   category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@index([userId, priority])
+}
+
+/// A paid plan, mirrored from a Stripe Product by the webhook (see
+/// lib/services/billing.ts). Free has no row: a user without an entitled
+/// subscription gets FREE_ENTITLEMENTS from lib/billing/entitlements.ts.
+model Plan {
+  id              String   @id @default(cuid())
+  stripeProductId String   @unique
+  name            String
+  description     String?
+  /// false once the product is archived or deleted in Stripe
+  isActive        Boolean  @default(true)
+  /// parsed from the product's metadata, see parseEntitlements
+  entitlements    Json
+  updatedAt       DateTime @updatedAt
+
+  prices        PlanPrice[]
+  subscriptions Subscription[]
+}
+
+model PlanPrice {
+  id            String  @id @default(cuid())
+  planId        String
+  stripePriceId String  @unique
+  /// smallest currency unit (cents)
+  unitAmount    Int
+  currency      String
+  /// "month" | "year"
+  interval      String
+  isActive      Boolean @default(true)
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+}
+
+/// One row per user; the latest Stripe subscription replaces the previous one.
+model Subscription {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  planId               String
+  stripeSubscriptionId String             @unique
+  stripePriceId        String
+  status               SubscriptionStatus
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean            @default(false)
+  updatedAt            DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@index([planId])
+}
+
+/// Stripe event ids already handled, so a redelivered webhook is a no-op.
+model StripeEvent {
+  id         String   @id
+  type       String
+  receivedAt DateTime @default(now())
 }

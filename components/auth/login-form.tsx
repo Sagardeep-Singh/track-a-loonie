@@ -6,12 +6,13 @@ import { signInAction } from '@/lib/auth/actions';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
 
-export const LoginForm = (): React.ReactElement => {
+export const LoginForm = ({ next }: { next?: string }): React.ReactElement => {
   const [error, formAction, pending] = useActionState(signInAction, undefined);
   const [showPassword, setShowPassword] = useState(false);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {next && <input type="hidden" name="next" value={next} />}
       <div>
         <Label htmlFor="email">Email</Label>
         <Input
