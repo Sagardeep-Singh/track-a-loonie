@@ -7,8 +7,10 @@ const { prismaMock } = vi.hoisted(() => ({
       findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
     },
+    $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
     account: { findFirst: vi.fn() },
     category: { findFirst: vi.fn() },
     reimbursementLink: { count: vi.fn() },
@@ -29,7 +31,7 @@ const { ReimbursementConflictError, ServiceValidationError } =
 
 beforeEach(() => {
   vi.clearAllMocks();
-  prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1' });
+  prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'CREDIT_CARD' });
   prismaMock.reimbursementLink.count.mockResolvedValue(0);
 });
 
@@ -176,6 +178,41 @@ describe('createTransaction isPayment', () => {
       expect.objectContaining({ data: expect.objectContaining({ isPayment: false }) }),
     );
   });
+
+  const paymentInput = {
+    accountId: 'acc-1',
+    amount: 50,
+    type: 'INCOME' as const,
+    date: new Date('2026-03-16'),
+    isPayment: true,
+    isTransfer: false,
+    isReimbursable: false,
+  };
+
+  it('accepts a payment on a line of credit', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'LINE_OF_CREDIT' });
+    prismaMock.transaction.create.mockResolvedValue(baseTx);
+
+    await createTransaction('user-1', paymentInput);
+
+    expect(prismaMock.transaction.create).toHaveBeenCalled();
+  });
+
+  it('rejects a payment on a non-liability account', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'CHECKING' });
+
+    await expect(createTransaction('user-1', paymentInput)).rejects.toThrow(
+      'Only a credit card or line of credit can receive a card payment',
+    );
+    expect(prismaMock.transaction.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a payment on an expense', async () => {
+    await expect(createTransaction('user-1', { ...paymentInput, type: 'EXPENSE' })).rejects.toThrow(
+      'Only income can be marked as a card payment',
+    );
+    expect(prismaMock.transaction.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('updateTransaction isPayment', () => {
@@ -188,6 +225,48 @@ describe('updateTransaction isPayment', () => {
     expect(prismaMock.transaction.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ isPayment: true }) }),
     );
+  });
+
+  it('checks the new account when a payment is moved to another account', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ ...baseExisting, isPayment: true });
+    prismaMock.account.findFirst.mockImplementation(({ where }: { where: { id: string } }) =>
+      Promise.resolve(
+        where.id === 'acc-2'
+          ? { id: 'acc-2', type: 'SAVINGS' }
+          : { id: where.id, type: 'CREDIT_CARD' },
+      ),
+    );
+
+    await expect(updateTransaction('user-1', 'tx-1', { accountId: 'acc-2' })).rejects.toThrow(
+      'Only a credit card or line of credit can receive a card payment',
+    );
+    expect(prismaMock.transaction.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects turning an existing payment into an expense', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ ...baseExisting, isPayment: true });
+
+    await expect(updateTransaction('user-1', 'tx-1', { type: 'EXPENSE' })).rejects.toThrow(
+      'Only income can be marked as a card payment',
+    );
+  });
+
+  it('allows the same edit once isPayment is cleared with it', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ ...baseExisting, isPayment: true });
+    prismaMock.transaction.update.mockResolvedValue({ ...baseTx, isPayment: false });
+
+    await updateTransaction('user-1', 'tx-1', { type: 'EXPENSE', isPayment: false });
+
+    expect(prismaMock.transaction.update).toHaveBeenCalled();
+  });
+
+  it('skips the account lookup for an edit that leaves isPayment off', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ ...baseExisting });
+    prismaMock.transaction.update.mockResolvedValue(baseTx);
+
+    await updateTransaction('user-1', 'tx-1', { payee: 'Coffee' });
+
+    expect(prismaMock.account.findFirst).not.toHaveBeenCalled();
   });
 });
 
@@ -239,6 +318,52 @@ describe('updateTransaction isTransfer', () => {
         data: expect.objectContaining({ isTransfer: true, transferMatchId: undefined }),
       }),
     );
+  });
+
+  it('un-marks the partner leg of a matched pair in the same database transaction', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      ...baseExisting,
+      isTransfer: true,
+      transferMatchId: 'match-1',
+    });
+    prismaMock.transaction.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.transaction.update.mockResolvedValue({ ...baseTx, isTransfer: false });
+
+    const result = await updateTransaction('user-1', 'tx-1', { isTransfer: false });
+
+    expect(prismaMock.transaction.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', transferMatchId: 'match-1', id: { not: 'tx-1' } },
+      data: { isTransfer: false, transferMatchId: null },
+    });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(result.isTransfer).toBe(false);
+  });
+
+  it('leaves other rows alone when an unmatched manual transfer is un-marked', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      ...baseExisting,
+      isTransfer: true,
+      transferMatchId: null,
+    });
+    prismaMock.transaction.update.mockResolvedValue({ ...baseTx, isTransfer: false });
+
+    await updateTransaction('user-1', 'tx-1', { isTransfer: false });
+
+    expect(prismaMock.transaction.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps the pair linked on an edit that does not touch isTransfer', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      ...baseExisting,
+      isTransfer: true,
+      transferMatchId: 'match-1',
+    });
+    prismaMock.transaction.update.mockResolvedValue({ ...baseTx, isTransfer: true });
+
+    await updateTransaction('user-1', 'tx-1', { payee: 'Visa payment' });
+
+    expect(prismaMock.transaction.updateMany).not.toHaveBeenCalled();
   });
 });
 

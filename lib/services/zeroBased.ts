@@ -16,14 +16,11 @@ import { currentMonthNumber } from '@/lib/format';
 import { getEffectiveLimits } from '@/lib/services/budgets';
 import { ServiceValidationError } from '@/lib/services/common';
 import { getGoalEffects, getGoalTargets } from '@/lib/services/savingsGoals';
-import {
-  fromCents,
-  listReimbursedAmountsByExpenseDate,
-  toCents,
-} from '@/lib/services/reimbursements';
+import { fromCents, listReimbursedAmounts, toCents } from '@/lib/services/reimbursements';
 import type {
   BudgetModeInput,
   MoveMoneyInput,
+  ReimbursementAttributionInput,
   SetAssignmentInput,
 } from '@/lib/validators/zero-based';
 
@@ -32,7 +29,21 @@ export type BudgetMode = 'LIMITS' | 'ZERO_BASED';
 export type FrontendBudgetSettings = {
   mode: BudgetMode;
   zbbStartMonth: number | null;
+  /** false: a reimbursement counts in the month its money arrives (default) */
+  reimbursementsInExpenseMonth: boolean;
 };
+
+type BudgetSettingsRow = {
+  mode: BudgetMode;
+  zbbStartMonth: number | null;
+  reimbursementsInExpenseMonth: boolean;
+} | null;
+
+const toFrontendSettings = (row: BudgetSettingsRow): FrontendBudgetSettings => ({
+  mode: row?.mode ?? 'LIMITS',
+  zbbStartMonth: row?.zbbStartMonth ?? null,
+  reimbursementsInExpenseMonth: row?.reimbursementsInExpenseMonth ?? false,
+});
 
 export type FrontendZbbCategory = {
   categoryId: string;
@@ -72,7 +83,7 @@ const OPEN_END = monthRange(299912).end;
 
 export const getBudgetSettings = async (userId: string): Promise<FrontendBudgetSettings> => {
   const row = await prisma.userBudgetSettings.findUnique({ where: { userId } });
-  return { mode: row?.mode ?? 'LIMITS', zbbStartMonth: row?.zbbStartMonth ?? null };
+  return toFrontendSettings(row);
 };
 
 /**
@@ -92,7 +103,21 @@ export const setBudgetMode = async (
     create: { userId, mode: input.mode, zbbStartMonth },
     update: { mode: input.mode, zbbStartMonth },
   });
-  return { mode: row.mode, zbbStartMonth: row.zbbStartMonth };
+  return toFrontendSettings(row);
+};
+
+/** Picks which month a reimbursement lowers spending in: the month its money
+ * arrives (default) or the month of the expense it pays back. */
+export const setReimbursementAttribution = async (
+  userId: string,
+  input: ReimbursementAttributionInput,
+): Promise<FrontendBudgetSettings> => {
+  const row = await prisma.userBudgetSettings.upsert({
+    where: { userId },
+    create: { userId, reimbursementsInExpenseMonth: input.reimbursementsInExpenseMonth },
+    update: { reimbursementsInExpenseMonth: input.reimbursementsInExpenseMonth },
+  });
+  return toFrontendSettings(row);
 };
 
 const requireZeroBased = async (userId: string): Promise<number> => {
@@ -144,7 +169,7 @@ const onBudgetBalanceCents = async (userId: string, accountIds: string[]): Promi
 
 /**
  * Category activity from the start month on: categorized EXPENSEs on on-budget
- * accounts, net of reimbursements (attributed to the expense's month, as in
+ * accounts, net of reimbursements (in the month they count, as in
  * `listBudgets`). A transfer leg counts only when its counterpart sits on an
  * off-budget account — money leaving the budget for savings is spending from
  * the budget's point of view; a card payment between two on-budget accounts
@@ -189,7 +214,7 @@ const categoryActivity = async (
           select: { transferMatchId: true },
         })
       : Promise.resolve([]),
-    listReimbursedAmountsByExpenseDate(userId, start, OPEN_END),
+    listReimbursedAmounts(userId, start, OPEN_END),
   ]);
   const leavingIds = new Set(leavingBudget.map((t) => t.transferMatchId));
 
@@ -208,7 +233,7 @@ const categoryActivity = async (
     if (!r.categoryId || !onBudgetExpenseIds.has(r.expenseTransactionId)) continue;
     cells.push({
       categoryId: r.categoryId,
-      month: monthOfDate(new Date(r.expenseDate)),
+      month: monthOfDate(new Date(r.date)),
       cents: -toCents(r.amount),
     });
   }

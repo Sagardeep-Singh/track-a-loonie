@@ -16,6 +16,7 @@ const { prismaMock } = vi.hoisted(() => ({
       count: vi.fn(),
       groupBy: vi.fn(),
     },
+    userBudgetSettings: { findUnique: vi.fn() },
   },
 }));
 
@@ -116,6 +117,11 @@ const groupByCallsWith = (by: string): GroupByArgs[] =>
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.transaction.count.mockResolvedValue(0);
+  // most summary cases below pin the expense-month netting; the default
+  // (month the money arrives) has its own case
+  prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+    reimbursementsInExpenseMonth: true,
+  });
   mockGroupBy({});
 });
 
@@ -431,6 +437,8 @@ describe('getTransactionsPage — Mode A', () => {
       debit: '0.30',
       payments: '0.00',
       transfers: '0.00',
+      paymentsIncome: '0.00',
+      transfersIncome: '0.00',
       reimbursementIncome: '0.00',
       net: '-0.20',
     });
@@ -456,6 +464,8 @@ describe('getTransactionsPage — Mode A', () => {
     expect(result.summary).toEqual({
       payments: '50.00', // payment AND transfer -> payments only
       transfers: '30.00',
+      paymentsIncome: '0.00',
+      transfersIncome: '0.00',
       reimbursementIncome: '45.00', // only the linked part of the income
       credit: '155.00', // 200 - 45 reimbursement share
       debit: '80.00',
@@ -492,6 +502,43 @@ describe('getTransactionsPage — Mode A', () => {
     const result = await getTransactionsPage('user-1', { ...scope(), limit: 50 });
 
     expect(result.summary.debit).toBe('70.00');
+  });
+
+  it('by default nets reimbursement income in view off Debit instead of each expense', async () => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
+    mockModeA(rowsDescending(1), [
+      // linked money counts where it arrives, so this stays gross
+      dbRow({
+        id: 'a',
+        date: '2026-06-01',
+        amount: 100,
+        reimbursable: { expected: 100, linked: [30] },
+      }),
+      // a manual top-up (60 expected, 10 linked) still nets on the expense
+      dbRow({
+        id: 'b',
+        date: '2026-06-01',
+        amount: 60,
+        reimbursable: { expected: 60, linked: [10] },
+        reimbursementCompletedAt: new Date('2026-06-02'),
+      }),
+      // 25 of this income is a reimbursement: off Debit, not Credit
+      dbRow({
+        id: 'c',
+        date: '2026-06-03',
+        amount: 40,
+        type: 'INCOME',
+        reimbursementIncome: true,
+        reimbursementIncomeLinked: 25,
+      }),
+    ]);
+
+    const result = await getTransactionsPage('user-1', { ...scope(), limit: 50 });
+
+    // 100 + (60 - 50) - 25
+    expect(result.summary.debit).toBe('85.00');
+    expect(result.summary.credit).toBe('15.00');
+    expect(result.summary.reimbursementIncome).toBe('0.00');
   });
 
   it('folds day totals from distinct instants into one signed UTC-day entry', async () => {
@@ -795,6 +842,8 @@ describe('getTransactionsPage — Mode B', () => {
       debit: '1.00',
       payments: '100.00',
       transfers: '0.00',
+      paymentsIncome: '0.00',
+      transfersIncome: '0.00',
       reimbursementIncome: '1000.00',
       net: '9.00',
     });

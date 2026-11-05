@@ -7,7 +7,6 @@ import { AnimatePresence, m } from 'framer-motion';
 import {
   ArrowLeftRight,
   CalendarRange,
-  HandCoins,
   Loader2,
   Plus,
   Search,
@@ -19,6 +18,7 @@ import { Drawer } from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Money } from '@/components/ui/money';
+import { TransactionBadges } from '@/components/transactions/transaction-badges';
 import { TransactionTotals } from '@/components/transactions/transaction-totals';
 import { TransactionForm } from '@/components/transactions/transaction-form';
 import { ReimbursedExpensesList } from '@/components/transactions/reimbursed-expenses-list';
@@ -36,7 +36,11 @@ import {
   transactionFiltersToSearchParams,
   type TransactionFilters,
 } from '@/lib/transactions/transaction-filters';
-import type { TransactionSummary } from '@/lib/transactions/transaction-summary';
+import {
+  includeInTotals,
+  type TotalsInclusion,
+  type TransactionSummary,
+} from '@/lib/transactions/transaction-summary';
 import {
   transactionsPageSearchParams,
   transactionsPageUrl,
@@ -80,6 +84,8 @@ const toTotals = (
   net: Number(summary.net),
   payments: Number(summary.payments),
   transfers: Number(summary.transfers),
+  paymentsIncome: Number(summary.paymentsIncome),
+  transfersIncome: Number(summary.transfersIncome),
   reimbursementIncome: Number(summary.reimbursementIncome),
 });
 
@@ -139,6 +145,10 @@ export const TransactionsView = ({
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false);
   const [filtersDialogKey, setFiltersDialogKey] = useState(0);
   const [matchDialogOpen, setMatchDialogOpen] = useState(false);
+  const [inclusion, setInclusion] = useState<TotalsInclusion>({
+    payments: true,
+    transfers: true,
+  });
   const [matchDialogKey, setMatchDialogKey] = useState(0);
 
   // Loaded pages for `pagesKey`. Key = `<scope query>#<reloadNonce>`; mutations bump the nonce.
@@ -602,7 +612,11 @@ export const TransactionsView = ({
         aria-busy={pending}
         className={cn('mt-3.5 hidden transition-opacity lg:block', pending && 'opacity-60')}
       >
-        <TransactionTotals summary={toTotals(summary, desktopCount)} />
+        <TransactionTotals
+          summary={includeInTotals(toTotals(summary, desktopCount), inclusion)}
+          inclusion={inclusion}
+          onInclusionChange={setInclusion}
+        />
       </div>
 
       <div className="hidden lg:block">{renderScopeError()}</div>
@@ -667,24 +681,7 @@ export const TransactionsView = ({
                                 <span className="truncate">{t.importBatchFilename}</span>
                               </div>
                             )}
-                            {t.isReimbursable && (
-                              <div className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]">
-                                <HandCoins size={11} />
-                                {t.reimbursementStatus === 'COMPLETE' ? (
-                                  <span>Reimbursable · reimbursed</span>
-                                ) : (
-                                  <span className="flex items-center gap-1">
-                                    Reimbursable ·{' '}
-                                    <Money
-                                      value={t.reimbursementOutstanding}
-                                      tone="neutral"
-                                      className="text-[11px]"
-                                    />{' '}
-                                    pending
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            <TransactionBadges transaction={t} className="mt-1" />
                             {t.spreadMonths !== null && t.spreadMonthlyAmount !== null && (
                               <div
                                 className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]"
@@ -803,7 +800,9 @@ export const TransactionsView = ({
         </div>
 
         <TransactionTotals
-          summary={toTotals(mobileSummary, totalCount)}
+          summary={includeInTotals(toTotals(mobileSummary, totalCount), inclusion)}
+          inclusion={inclusion}
+          onInclusionChange={setInclusion}
           className={cn('mt-3.5 transition-opacity', pending && 'opacity-60')}
         />
 
@@ -855,6 +854,7 @@ export const TransactionsView = ({
                                 className="shrink-0 text-[15.5px]"
                               />
                             </div>
+                            <TransactionBadges transaction={t} className="mt-1.5" />
                             <div className="mt-2.5 flex items-center justify-between gap-2.5">
                               <span className="text-ink-muted min-w-0 truncate text-xs">
                                 {t.accountName}

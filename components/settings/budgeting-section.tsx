@@ -15,6 +15,11 @@ const MODE_LABELS: Record<BudgetMode, string> = {
   ZERO_BASED: 'Zero-based',
 };
 
+const REIMBURSEMENT_OPTIONS = [
+  { inExpenseMonth: false, label: 'When received' },
+  { inExpenseMonth: true, label: 'Expense month' },
+];
+
 /**
  * Budgeting style picker. Turning zero-based on goes through a confirm step
  * that lists accounts with on-budget toggles, since which accounts feed Ready
@@ -36,6 +41,23 @@ export const BudgetingSection = ({
   );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inExpenseMonth, setInExpenseMonth] = useState(settings.reimbursementsInExpenseMonth);
+
+  const pickReimbursementMonth = async (next: boolean): Promise<void> => {
+    if (next === inExpenseMonth || pending) return;
+    setError(null);
+    setPending(true);
+    const res = await patchJSON<FrontendBudgetSettings>('/api/settings/reimbursement-attribution', {
+      reimbursementsInExpenseMonth: next,
+    });
+    setPending(false);
+    if (!res.ok) {
+      setError(res.error ?? 'Could not change when reimbursements count.');
+      return;
+    }
+    setInExpenseMonth(res.data.reimbursementsInExpenseMonth);
+    router.refresh();
+  };
 
   const saveMode = async (next: BudgetMode): Promise<boolean> => {
     const res = await patchJSON<FrontendBudgetSettings>('/api/settings/budget-mode', {
@@ -103,6 +125,32 @@ export const BudgetingSection = ({
             >
               <PillHighlight active={(confirming ? 'ZERO_BASED' : mode) === m} />
               <span className="relative">{MODE_LABELS[m]}</span>
+            </button>
+          ))}
+        </PillGroup>
+      </div>
+
+      <div className="border-line flex items-center gap-5 border-t py-3.5">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">Reimbursements</div>
+          <div className="text-ink-muted mt-0.5 text-[12.5px]">
+            {inExpenseMonth
+              ? 'Lower spending in the month of the expense they pay back. Past months can change.'
+              : 'Lower spending in the month the money arrives, so past months stay as they were.'}
+          </div>
+        </div>
+        <PillGroup>
+          {REIMBURSEMENT_OPTIONS.map((o) => (
+            <button
+              key={o.label}
+              type="button"
+              aria-pressed={inExpenseMonth === o.inExpenseMonth}
+              onClick={() => pickReimbursementMonth(o.inExpenseMonth)}
+              disabled={pending}
+              className={pillOption(inExpenseMonth === o.inExpenseMonth, pending)}
+            >
+              <PillHighlight active={inExpenseMonth === o.inExpenseMonth} />
+              <span className="relative">{o.label}</span>
             </button>
           ))}
         </PillGroup>

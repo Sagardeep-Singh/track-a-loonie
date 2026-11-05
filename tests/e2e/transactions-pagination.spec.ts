@@ -131,8 +131,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       statementDay: 15,
     })
   ).id;
+  // a liability, so its card-payment fixtures pass the server's isPayment guard;
+  // not CREDIT_CARD, so the page shows no statement-period UI for it
   ids.chips = (
-    await post<{ id: string }>('/api/accounts', { name: names.chips, type: 'CHECKING' })
+    await post<{ id: string }>('/api/accounts', { name: names.chips, type: 'LINE_OF_CREDIT' })
   ).id;
   ids.category = (await post<{ id: string }>('/api/categories', { name: names.category })).id;
 
@@ -477,23 +479,47 @@ test('6. By statement places rows on each side of the close date correctly', asy
   await expect(inCurrent).toBeHidden();
 });
 
-test('8. totals card keeps bucket precedence and nets reimbursed spending', async () => {
+test('8. totals card keeps bucket precedence, nets reimbursed spending and toggles payments/transfers', async () => {
   await visit([ids.chips]);
   const bar = summary();
   await expect(bar).toContainText('6 transactions');
   const stat = (label: string): Locator =>
     bar.locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]');
+  const toggle = (label: string): Locator => bar.getByRole('button', { name: label });
+  // both payments (200 + 30)
+  await expect(toggle('Payments')).toContainText('$230.00');
+  await expect(toggle('Transfers')).toContainText('$50.00');
+  // the $40 payback is netted from Debit by default, so it isn't listed as kept out
+  await expect(bar.getByText('Not in totals: Reimbursements')).toHaveCount(0);
+
+  // included by default: $230 of payment income in Credit, the $50 transfer out in Debit
+  await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle('Transfers')).toHaveAttribute('aria-pressed', 'true');
+  await expect(stat('Credit')).toContainText('330.00');
+  await expect(stat('Debit')).toContainText('50.00');
+  await expect(stat('Net')).toContainText('280.00');
+
+  await toggle('Payments').click();
+  await toggle('Transfers').click();
+  await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'false');
   // the $40 payback is linked reimbursement income, so it is NOT credit
   await expect(stat('Credit')).toContainText('100.00');
-  // the $40 lunch is fully reimbursed, so it nets out of Debit (like Overview's Out)
+  // the $40 payback lands in the same view, so it comes off Debit (like
+  // Overview's Out in the month the money arrives)
   await expect(stat('Debit')).toContainText('0.00');
   await expect(stat('Net')).toContainText('100.00');
-  const excluded = (label: string): Locator =>
-    bar.locator('span').filter({ hasText: label }).locator('span.font-money');
-  // both payments (200 + 30)
-  await expect(excluded('Payments')).toHaveText('$230.00');
-  await expect(excluded('Transfers')).toHaveText('$50.00');
-  await expect(excluded('Reimbursements')).toHaveText('$40.00');
+});
+
+test('8c. rows carry Reimbursement, Payment, Transfer and Reimbursable badges', async () => {
+  await visit([ids.chips]);
+  const badges = (payee: string): Locator =>
+    row(`${payee} ${stamp}`).getByTestId('transaction-badge');
+  await expect(badges('Chips Payback')).toHaveText(['Reimbursement']);
+  await expect(badges('Chips Payment')).toHaveText(['Payment']);
+  await expect(badges('Chips Payment 2')).toHaveText(['Payment']);
+  await expect(badges('Chips Transfer')).toHaveText(['Transfer']);
+  await expect(badges('Chips Work Lunch')).toHaveText(['Reimbursable · reimbursed']);
+  await expect(badges('Chips Salary')).toHaveCount(0);
 });
 
 test('8b. the pending reimbursements filter narrows server-side', async () => {

@@ -1,6 +1,6 @@
 import { Money } from '@/components/ui/money';
 import { cn } from '@/lib/cn';
-import type { TransactionSummary } from '@/lib/transactions/transaction-summary';
+import type { TotalsInclusion, TransactionSummary } from '@/lib/transactions/transaction-summary';
 
 const Stat = ({
   label,
@@ -20,20 +20,28 @@ const Stat = ({
 );
 
 /** Period totals for the transactions list. Credit/Debit/Net sit in their own
- * columns so they read at a glance; amounts kept out of those totals (card
- * payments, transfers, reimbursements) go in a quieter footer line. */
+ * columns so they read at a glance. Card payments and transfers get toggles to
+ * include/exclude them. Reimbursement income never counts as credit: by
+ * default it comes off Debit, and with the expense-month setting it's listed
+ * on its own, quieter line instead. */
 export const TransactionTotals = ({
   summary,
+  inclusion,
+  onInclusionChange,
   className,
 }: {
   summary: TransactionSummary;
+  inclusion: TotalsInclusion;
+  onInclusionChange: (inclusion: TotalsInclusion) => void;
   className?: string;
 }): React.ReactElement => {
-  const excluded = [
-    { label: 'Payments', value: summary.payments },
-    { label: 'Transfers', value: summary.transfers },
-    { label: 'Reimbursements', value: summary.reimbursementIncome },
-  ].filter((item) => item.value > 0);
+  const toggles = (
+    [
+      { key: 'payments', label: 'Payments', value: summary.payments },
+      { key: 'transfers', label: 'Transfers', value: summary.transfers },
+    ] as const
+  ).filter((item) => item.value > 0);
+  const excluded = summary.reimbursementIncome > 0;
 
   return (
     <section
@@ -62,16 +70,48 @@ export const TransactionTotals = ({
           />
         </Stat>
       </dl>
-      {excluded.length > 0 && (
-        <p className="border-line text-ink-muted mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t pt-2.5 text-xs">
-          <span>Not in totals:</span>
-          {excluded.map((item) => (
-            <span key={item.label} className="flex items-baseline gap-1.5">
-              {item.label}
-              <Money value={item.value} tone="neutral" className="text-ink-muted" />
+      {(toggles.length > 0 || excluded) && (
+        <div className="border-line text-ink-muted mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t pt-2.5 text-xs">
+          {toggles.length > 0 && (
+            <div role="group" aria-label="Include in totals" className="flex flex-wrap gap-1.5">
+              {toggles.map((item) => {
+                const on = inclusion[item.key];
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    aria-pressed={on}
+                    title={
+                      on
+                        ? `Exclude ${item.label.toLowerCase()}`
+                        : `Include ${item.label.toLowerCase()}`
+                    }
+                    onClick={() => onInclusionChange({ ...inclusion, [item.key]: !on })}
+                    className={cn(
+                      'flex items-baseline gap-1.5 rounded-full border px-2.5 py-1 transition-colors',
+                      on
+                        ? 'border-iris bg-paper text-ink'
+                        : 'border-line text-ink-muted hover:text-ink line-through decoration-1',
+                    )}
+                  >
+                    {item.label}
+                    <Money value={item.value} tone="neutral" className="text-inherit" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {excluded && (
+            <span className="flex items-baseline gap-1.5">
+              Not in totals: Reimbursements
+              <Money
+                value={summary.reimbursementIncome}
+                tone="neutral"
+                className="text-ink-muted"
+              />
             </span>
-          ))}
-        </p>
+          )}
+        </div>
       )}
     </section>
   );

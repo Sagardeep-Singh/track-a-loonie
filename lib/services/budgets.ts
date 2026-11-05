@@ -1,7 +1,7 @@
 import { monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { ServiceValidationError } from '@/lib/services/common';
-import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
+import { listReimbursedAmounts } from '@/lib/services/reimbursements';
 import { categoryHasGoal } from '@/lib/services/savingsGoals';
 import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 import type { CreateBudgetInput, UpdateBudgetInput } from '@/lib/validators/budgets';
@@ -65,9 +65,9 @@ export const listBudgets = async (userId: string, month: number): Promise<Fronte
       },
       _sum: { amount: true },
     }),
-    // net reimbursements out of spend, attributed to the *expense's* month —
-    // a reimbursement received later still reduces the month the money was spent in
-    listReimbursedAmountsByExpenseDate(userId, start, end),
+    // net reimbursements out of spend, in the month they arrive by default or
+    // the expense's month when the user opts in (see listReimbursedAmounts)
+    listReimbursedAmounts(userId, start, end),
     listSpreadSharesInRange(userId, month, month),
   ]);
 

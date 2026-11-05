@@ -15,6 +15,10 @@ export const budgetModeSchema = z.object({
   mode: z.enum(['LIMITS', 'ZERO_BASED']),
 });
 
+export const reimbursementAttributionSchema = z.object({
+  reimbursementsInExpenseMonth: z.boolean(),
+});
+
 /** absolute amount assigned to one category for one month; negative is allowed
  * (money moved out of a category funded in an earlier month) */
 export const setAssignmentSchema = z.object({
@@ -45,6 +49,7 @@ export const zbbMonthQuerySchema = z.object({
 });
 
 export type BudgetModeInput = z.infer<typeof budgetModeSchema>;
+export type ReimbursementAttributionInput = z.infer<typeof reimbursementAttributionSchema>;
 export type SetAssignmentInput = z.infer<typeof setAssignmentSchema>;
 export type MoveMoneyInput = z.infer<typeof moveMoneySchema>;
 export type AssignToTargetsInput = z.infer<typeof assignToTargetsSchema>;

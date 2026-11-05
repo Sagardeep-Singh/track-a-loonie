@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db/prisma';
 import { ServiceValidationError } from '@/lib/services/common';
 import {
   fromCents,
+  getReimbursementsInExpenseMonth,
   listPendingReimbursementExpenseIds,
   toCents,
 } from '@/lib/services/reimbursements';
@@ -40,6 +41,8 @@ export type TransactionSummary = {
   debit: string;
   payments: string;
   transfers: string;
+  paymentsIncome: string;
+  transfersIncome: string;
   reimbursementIncome: string;
   net: string;
 };
@@ -229,7 +232,7 @@ const sumLinks = (links: { amount: unknown }[]): string =>
   fromCents(links.reduce((sum, l) => sum + toCents(l.amount), 0));
 
 /** Reimbursement-netted totals; needs per-row fields, so no `groupBy`. */
-const summarizeRows = (rows: SummaryRow[]): TransactionSummary => {
+const summarizeRows = (rows: SummaryRow[], inExpenseMonth: boolean): TransactionSummary => {
   const totals = summarizeTransactions(
     rows.map((r) => ({
       amount: fromCents(toCents(r.amount)),
@@ -246,12 +249,15 @@ const summarizeRows = (rows: SummaryRow[]): TransactionSummary => {
       reimbursementCompletedManually: r.reimbursementCompletedAt !== null,
       reimbursementIncomeLinkedTotal: sumLinks(r.reimbursementIncomeLinks),
     })),
+    { inExpenseMonth },
   );
   return {
     credit: totals.credit.toFixed(2),
     debit: totals.debit.toFixed(2),
     payments: totals.payments.toFixed(2),
     transfers: totals.transfers.toFixed(2),
+    paymentsIncome: totals.paymentsIncome.toFixed(2),
+    transfersIncome: totals.transfersIncome.toFixed(2),
     reimbursementIncome: totals.reimbursementIncome.toFixed(2),
     net: totals.net.toFixed(2),
   };
@@ -260,12 +266,13 @@ const summarizeRows = (rows: SummaryRow[]): TransactionSummary => {
 /** Totals and row count from one scan. */
 const summarize = async (
   where: Prisma.TransactionWhereInput,
+  inExpenseMonth: boolean,
 ): Promise<{ summary: TransactionSummary; count: number }> => {
   const rows = (await prisma.transaction.findMany({
     where,
     select: SUMMARY_SELECT,
   })) as SummaryRow[];
-  return { summary: summarizeRows(rows), count: rows.length };
+  return { summary: summarizeRows(rows, inExpenseMonth), count: rows.length };
 };
 
 const toDayTotals = (byDay: Map<string, number>): DayTotal[] =>
@@ -310,6 +317,7 @@ const getPageModeA = async (
   request: TransactionsPageRequest,
   cursor: TransactionCursor | null,
   pendingReimbursementIds: string[] | undefined,
+  inExpenseMonth: boolean,
 ): Promise<TransactionsPageResult> => {
   const where = buildTransactionWhere(userId, request, {
     mobile: true,
@@ -332,8 +340,8 @@ const getPageModeA = async (
       take: request.limit + 1,
     }),
     prisma.transaction.count({ where: { AND: [pillFreeWhere, { categoryId: null }] } }),
-    summarize(desktopWhere),
-    mobileDefaults ? Promise.resolve(null) : summarize(where),
+    summarize(desktopWhere, inExpenseMonth),
+    mobileDefaults ? Promise.resolve(null) : summarize(where, inExpenseMonth),
   ]);
   const mobile = mobileOrNull ?? desktop;
 
@@ -395,6 +403,7 @@ const getPageModeB = async (
   request: TransactionsPageRequest,
   cursor: TransactionCursor | null,
   pendingReimbursementIds: string[] | undefined,
+  inExpenseMonth: boolean,
 ): Promise<TransactionsPageResult> => {
   // Pill filters are skipped here so the same scan counts the badge; applied in JS below.
   const scan = (await prisma.transaction.findMany({
@@ -427,8 +436,8 @@ const getPageModeB = async (
     totalCount: full.length,
     desktopCount: desktop.length,
     uncategorizedCount: pillFree.filter((r) => !r.categoryId).length,
-    summary: summarizeRows(desktop),
-    mobileSummary: summarizeRows(full),
+    summary: summarizeRows(desktop, inExpenseMonth),
+    mobileSummary: summarizeRows(full, inExpenseMonth),
   };
 
   const after = cursor ? full.filter((r) => isOlderThanCursor(r, cursor)) : full;
@@ -471,10 +480,13 @@ export const getTransactionsPage = async (
     cursor = decodeTransactionCursor(request.cursor);
     if (!cursor) throw new ServiceValidationError('Invalid cursor');
   }
-  const pendingReimbursementIds = request.filters.pendingReimbursementsOnly
-    ? await listPendingReimbursementExpenseIds(userId)
-    : undefined;
+  const [pendingReimbursementIds, inExpenseMonth] = await Promise.all([
+    request.filters.pendingReimbursementsOnly
+      ? listPendingReimbursementExpenseIds(userId)
+      : Promise.resolve(undefined),
+    getReimbursementsInExpenseMonth(userId),
+  ]);
   return needsModeB(request)
-    ? getPageModeB(userId, request, cursor, pendingReimbursementIds)
-    : getPageModeA(userId, request, cursor, pendingReimbursementIds);
+    ? getPageModeB(userId, request, cursor, pendingReimbursementIds, inExpenseMonth)
+    : getPageModeA(userId, request, cursor, pendingReimbursementIds, inExpenseMonth);
 };

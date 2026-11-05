@@ -14,7 +14,7 @@ const { prismaMock } = vi.hoisted(() => {
       aggregate: vi.fn(),
     },
     budget: { findMany: vi.fn() },
-    reimbursementLink: { findMany: vi.fn() },
+    reimbursementLink: { findMany: vi.fn(), groupBy: vi.fn() },
     savingsGoal: { findMany: vi.fn() },
   };
   return {
@@ -27,8 +27,15 @@ const { prismaMock } = vi.hoisted(() => {
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: prismaMock }));
 
-const { assignToTargets, getZbbMonth, getZbbOverview, moveMoney, setAssignment, setBudgetMode } =
-  await import('@/lib/services/zeroBased');
+const {
+  assignToTargets,
+  getZbbMonth,
+  getZbbOverview,
+  moveMoney,
+  setAssignment,
+  setBudgetMode,
+  setReimbursementAttribution,
+} = await import('@/lib/services/zeroBased');
 const { ServiceValidationError } = await import('@/lib/services/common');
 const { READY_TO_ASSIGN } = await import('@/lib/budgets/zero-based-math');
 
@@ -90,6 +97,7 @@ beforeEach(() => {
   prismaMock.categoryAssignment.findUnique.mockResolvedValue(null);
   prismaMock.budget.findMany.mockResolvedValue([]);
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
+  prismaMock.reimbursementLink.groupBy.mockResolvedValue([]);
   prismaMock.savingsGoal.findMany.mockResolvedValue([]);
   mockTransactions({});
 });
@@ -118,7 +126,11 @@ describe('setBudgetMode', () => {
 
     const result = await setBudgetMode('user-1', { mode: 'ZERO_BASED' });
 
-    expect(result).toEqual({ mode: 'ZERO_BASED', zbbStartMonth: 202610 });
+    expect(result).toEqual({
+      mode: 'ZERO_BASED',
+      zbbStartMonth: 202610,
+      reimbursementsInExpenseMonth: false,
+    });
   });
 
   it('keeps the original start month when switching back and forth', async () => {
@@ -133,6 +145,31 @@ describe('setBudgetMode', () => {
     const result = await setBudgetMode('user-1', { mode: 'ZERO_BASED' });
 
     expect(result.zbbStartMonth).toBe(202601);
+  });
+});
+
+describe('setReimbursementAttribution', () => {
+  it('upserts the setting and returns the full settings', async () => {
+    prismaMock.userBudgetSettings.upsert.mockResolvedValue({
+      mode: 'LIMITS',
+      zbbStartMonth: null,
+      reimbursementsInExpenseMonth: true,
+    });
+
+    const result = await setReimbursementAttribution('user-1', {
+      reimbursementsInExpenseMonth: true,
+    });
+
+    expect(prismaMock.userBudgetSettings.upsert).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      create: { userId: 'user-1', reimbursementsInExpenseMonth: true },
+      update: { reimbursementsInExpenseMonth: true },
+    });
+    expect(result).toEqual({
+      mode: 'LIMITS',
+      zbbStartMonth: null,
+      reimbursementsInExpenseMonth: true,
+    });
   });
 });
 
@@ -248,13 +285,44 @@ describe('getZbbMonth', () => {
       {
         amount: 20,
         expenseTransactionId: 'lunch',
-        expense: { categoryId: 'food', date: new Date('2026-10-04') },
+        createdAt: new Date('2026-10-09'),
+        income: { date: new Date('2026-10-09') },
+        expense: { categoryId: 'food', date: new Date('2026-10-04'), amount: 60 },
       },
     ]);
 
     const result = await getZbbMonth('user-1', 202610);
 
     expect(result.categories.find((c) => c.categoryId === 'food')?.activity).toBe('40.00');
+  });
+
+  it('leaves the expense month alone when the money comes back in a later month', async () => {
+    zeroBased();
+    mockTransactions({
+      expenses: [
+        {
+          id: 'lunch',
+          categoryId: 'food',
+          amount: 60,
+          date: new Date('2026-10-04'),
+          isTransfer: false,
+          transferMatchId: null,
+        },
+      ],
+    });
+    prismaMock.reimbursementLink.findMany.mockResolvedValue([
+      {
+        amount: 20,
+        expenseTransactionId: 'lunch',
+        createdAt: new Date('2026-11-02'),
+        income: { date: new Date('2026-11-02') },
+        expense: { categoryId: 'food', date: new Date('2026-10-04'), amount: 60 },
+      },
+    ]);
+
+    const result = await getZbbMonth('user-1', 202610);
+
+    expect(result.categories.find((c) => c.categoryId === 'food')?.activity).toBe('60.00');
   });
 
   it('reports uncategorized on-budget spending', async () => {

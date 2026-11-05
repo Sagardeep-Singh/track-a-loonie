@@ -603,29 +603,129 @@ export type ReimbursedExpenseRow = {
   expenseTransactionId: string;
   categoryId: string | null;
   expenseDate: string;
+  /** when the reimbursement counts: the income's date in the default mode,
+   * the expense's date in expense-month mode and for manual top-ups */
+  date: string;
   amount: string;
 };
 
-/** reimbursed amounts for EXPENSES falling in [start, end) — the net-out source for
- * budgets/overview/trends. One row per link, plus a top-up row for an expense the user
- * manually marked fully reimbursed, covering whatever of its expected amount isn't linked. */
-export const listReimbursedAmountsByExpenseDate = async (
+/** the user's reimbursement attribution setting; false (the default) counts a
+ * reimbursement in the month its money arrives */
+export const getReimbursementsInExpenseMonth = async (userId: string): Promise<boolean> => {
+  const row = await prisma.userBudgetSettings.findUnique({
+    where: { userId },
+    select: { reimbursementsInExpenseMonth: true },
+  });
+  return row?.reimbursementsInExpenseMonth ?? false;
+};
+
+type LinkRow = {
+  expenseTransactionId: string;
+  categoryId: string | null;
+  expenseDate: Date;
+  date: Date;
+  cents: number;
+};
+
+/** links whose income arrived in [start, end), each capped so the running
+ * total on one expense (oldest income first, counting links before `start`)
+ * never passes the expense amount — overshoot never becomes credit */
+const listLinksByIncomeDate = async (
+  userId: string,
+  start: Date,
+  end: Date,
+): Promise<LinkRow[]> => {
+  const rows = await prisma.reimbursementLink.findMany({
+    where: {
+      userId,
+      expense: { type: 'EXPENSE', isTransfer: false },
+      income: { date: { gte: start, lt: end } },
+    },
+    select: {
+      amount: true,
+      expenseTransactionId: true,
+      createdAt: true,
+      income: { select: { date: true } },
+      expense: { select: { categoryId: true, date: true, amount: true } },
+    },
+  });
+  if (rows.length === 0) return [];
+  const earlier = await prisma.reimbursementLink.groupBy({
+    by: ['expenseTransactionId'],
+    where: {
+      userId,
+      expenseTransactionId: { in: [...new Set(rows.map((r) => r.expenseTransactionId))] },
+      income: { date: { lt: start } },
+    },
+    _sum: { amount: true },
+  });
+  const usedCents = new Map(
+    earlier.map((e) => [e.expenseTransactionId, toCents(e._sum.amount ?? 0)]),
+  );
+  const ordered = [...rows].sort(
+    (a, b) =>
+      a.income.date.getTime() - b.income.date.getTime() ||
+      a.createdAt.getTime() - b.createdAt.getTime(),
+  );
+  return ordered.flatMap((r) => {
+    const used = usedCents.get(r.expenseTransactionId) ?? 0;
+    const cents = Math.min(toCents(r.amount), Math.max(0, toCents(r.expense.amount) - used));
+    usedCents.set(r.expenseTransactionId, used + toCents(r.amount));
+    return cents > 0
+      ? [
+          {
+            expenseTransactionId: r.expenseTransactionId,
+            categoryId: r.expense.categoryId,
+            expenseDate: r.expense.date,
+            date: r.income.date,
+            cents,
+          },
+        ]
+      : [];
+  });
+};
+
+const listLinksByExpenseDate = async (
+  userId: string,
+  start: Date,
+  end: Date,
+): Promise<LinkRow[]> => {
+  const rows = await prisma.reimbursementLink.findMany({
+    where: {
+      userId,
+      expense: { type: 'EXPENSE', isTransfer: false, date: { gte: start, lt: end } },
+    },
+    select: {
+      amount: true,
+      expenseTransactionId: true,
+      expense: { select: { categoryId: true, date: true } },
+    },
+  });
+  return rows.map((r) => ({
+    expenseTransactionId: r.expenseTransactionId,
+    categoryId: r.expense.categoryId,
+    expenseDate: r.expense.date,
+    date: r.expense.date,
+    cents: toCents(r.amount),
+  }));
+};
+
+/** reimbursed amounts that count in [start, end) — the net-out source for
+ * budgets/overview/trends/zero-based. By default a link counts on its income's
+ * date, so a late reimbursement never rewrites a past month; with the user's
+ * expense-month setting it counts on the expense's date instead. A manually
+ * completed expense adds a top-up row for whatever of its expected amount
+ * isn't linked, always on the expense's date (there's no arrival date). */
+export const listReimbursedAmounts = async (
   userId: string,
   start: Date,
   end: Date,
 ): Promise<ReimbursedExpenseRow[]> => {
-  const [rows, manuallyCompleted] = await Promise.all([
-    prisma.reimbursementLink.findMany({
-      where: {
-        userId,
-        expense: { type: 'EXPENSE', isTransfer: false, date: { gte: start, lt: end } },
-      },
-      select: {
-        amount: true,
-        expenseTransactionId: true,
-        expense: { select: { categoryId: true, date: true } },
-      },
-    }),
+  const inExpenseMonth = await getReimbursementsInExpenseMonth(userId);
+  const [links, manuallyCompleted] = await Promise.all([
+    inExpenseMonth
+      ? listLinksByExpenseDate(userId, start, end)
+      : listLinksByIncomeDate(userId, start, end),
     prisma.transaction.findMany({
       where: {
         userId,
@@ -644,11 +744,12 @@ export const listReimbursedAmountsByExpenseDate = async (
       },
     }),
   ]);
-  const linkRows = rows.map((r) => ({
+  const linkRows = links.map((r) => ({
     expenseTransactionId: r.expenseTransactionId,
-    categoryId: r.expense.categoryId,
-    expenseDate: r.expense.date.toISOString(),
-    amount: fromCents(toCents(r.amount)),
+    categoryId: r.categoryId,
+    expenseDate: r.expenseDate.toISOString(),
+    date: r.date.toISOString(),
+    amount: fromCents(r.cents),
   }));
   const topUpRows = manuallyCompleted.flatMap((t) => {
     const linkedCents = t.reimbursementExpenseLinks.reduce((sum, l) => sum + toCents(l.amount), 0);
@@ -659,6 +760,7 @@ export const listReimbursedAmountsByExpenseDate = async (
             expenseTransactionId: t.id,
             categoryId: t.categoryId,
             expenseDate: t.date.toISOString(),
+            date: t.date.toISOString(),
             amount: fromCents(remainingCents),
           },
         ]
