@@ -146,7 +146,7 @@ export const consumeVerificationToken = async (rawToken: string): Promise<Consum
   }
 
   await prisma.$transaction([
-    prisma.user.update({ where: { id: token.userId }, data: { emailVerified: new Date() } }),
+    prisma.user.update({ where: { id: token.userId }, data: { emailVerified: true } }),
     prisma.emailVerificationToken.delete({ where: { userId: token.userId } }),
   ]);
   return 'verified';
@@ -161,5 +161,5 @@ export const getEmailVerificationStatus = async (
     where: { id: userId },
     select: { emailVerified: true },
   });
-  return { verified: Boolean(user?.emailVerified), configured: isEmailVerificationConfigured() };
+  return { verified: user?.emailVerified ?? false, configured: isEmailVerificationConfigured() };
 };

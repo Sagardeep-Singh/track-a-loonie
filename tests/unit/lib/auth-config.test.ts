@@ -1,102 +1,58 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import bcrypt from 'bcryptjs';
+import { describe, expect, it, vi } from 'vitest';
 
-const { prismaMock, findOrCreateGoogleUserMock } = vi.hoisted(() => ({
-  prismaMock: { user: { findUnique: vi.fn() } },
-  findOrCreateGoogleUserMock: vi.fn(),
-}));
+vi.mock('@/lib/db/prisma', () => ({ prisma: {} }));
 
-vi.mock('@/lib/db/prisma', () => ({ prisma: prismaMock }));
-vi.mock('@/lib/services/users', () => ({ findOrCreateGoogleUser: findOrCreateGoogleUserMock }));
+const { authOptions, DISABLED_PATHS } = await import('@/lib/auth/auth');
 
-const { authConfig } = await import('@/lib/auth/config');
+describe('authOptions', () => {
+  it('verifies a bcrypt hash carried over from NextAuth', async () => {
+    const legacyHash = bcrypt.hashSync('existing-password-1', 12);
+    const { verify } = authOptions.emailAndPassword.password;
 
-beforeEach(() => {
-  vi.clearAllMocks();
-});
-
-const jwt = authConfig.callbacks!.jwt!;
-const session = authConfig.callbacks!.session!;
-
-describe('jwt callback', () => {
-  it('sets reauthenticatedAt on a fresh Google sign-in', async () => {
-    findOrCreateGoogleUserMock.mockResolvedValue({ id: 'user-1' });
-    const before = Date.now();
-
-    const token = await jwt({
-      token: {},
-      user: { email: 'a@example.com', name: 'A' },
-      account: { provider: 'google' },
-    } as never);
-
-    expect(token).not.toBeNull();
-    expect((token as { userId: string }).userId).toBe('user-1');
-    expect((token as { reauthenticatedAt: number }).reauthenticatedAt).toBeGreaterThanOrEqual(
-      before,
-    );
-    // A fresh sign-in already loaded the user via findOrCreateGoogleUser —
-    // the stale-user existence check must not fire a redundant lookup.
-    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+    await expect(verify({ hash: legacyHash, password: 'existing-password-1' })).resolves.toBe(true);
+    await expect(verify({ hash: legacyHash, password: 'wrong-password' })).resolves.toBe(false);
   });
 
-  it('does not set reauthenticatedAt for a credentials sign-in', async () => {
-    const token = await jwt({
-      token: {},
-      user: { id: 'user-2', email: 'b@example.com', name: 'B' },
-      account: { provider: 'credentials' },
-    } as never);
+  it('hashes new passwords with bcrypt at 12 rounds', async () => {
+    const hash = await authOptions.emailAndPassword.password.hash('a-new-password');
 
-    expect((token as { userId: string }).userId).toBe('user-2');
-    expect((token as { reauthenticatedAt?: number }).reauthenticatedAt).toBeUndefined();
-    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+    expect(bcrypt.getRounds(hash)).toBe(12);
+    await expect(bcrypt.compare('a-new-password', hash)).resolves.toBe(true);
   });
 
-  it('leaves an existing reauthenticatedAt untouched on a subsequent, non-sign-in call', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1' });
-
-    const token = await jwt({
-      token: { userId: 'user-1', reauthenticatedAt: 12345 },
-      user: undefined,
-      account: null,
-    } as never);
-
-    expect((token as { reauthenticatedAt: number }).reauthenticatedAt).toBe(12345);
-    // No `user` on this call: it's a token refresh, not a sign-in, so the
-    // stale-existence check is the one that must run.
-    expect(prismaMock.user.findUnique).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
-      select: { id: true },
-    });
+  it('keeps 7-day sessions refreshed at most daily, with no cookie cache', () => {
+    expect(authOptions.session).toEqual({ expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 });
+    expect(authOptions.session).not.toHaveProperty('cookieCache');
   });
 
-  it('returns null for a token whose user no longer exists', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(null);
-
-    const token = await jwt({
-      token: { userId: 'deleted-user' },
-      user: undefined,
-      account: null,
-    } as never);
-
-    expect(token).toBeNull();
-  });
-});
-
-describe('session callback', () => {
-  it('exposes reauthenticatedAt from the token', async () => {
-    const result = (await session({
-      session: { user: { id: '', email: null, name: null }, expires: '' },
-      token: { userId: 'user-1', reauthenticatedAt: 999 },
-    } as never)) as { user: { reauthenticatedAt: number | null } };
-
-    expect(result.user.reauthenticatedAt).toBe(999);
+  it("maps Better Auth's account model away from the bank Account model", () => {
+    expect(authOptions.account.modelName).toBe('authAccount');
   });
 
-  it('exposes null when the token has no reauthenticatedAt (credentials session)', async () => {
-    const result = (await session({
-      session: { user: { id: '', email: null, name: null }, expires: '' },
-      token: { userId: 'user-2' },
-    } as never)) as { user: { reauthenticatedAt: number | null } };
+  it('encrypts the OAuth tokens Google returns before storing them', () => {
+    expect(authOptions.account.encryptOAuthTokens).toBe(true);
+  });
 
-    expect(result.user.reauthenticatedAt).toBeNull();
+  it('never lets Better Auth create users from email/password itself', () => {
+    expect(authOptions.emailAndPassword.disableSignUp).toBe(true);
+  });
+
+  it.each([
+    '/sign-in/email',
+    '/sign-up/email',
+    '/sign-in/social',
+    '/request-password-reset',
+    '/reset-password',
+    '/change-password',
+    '/delete-user',
+  ])('closes %s over HTTP so callers cannot skip the server actions', (path) => {
+    expect(DISABLED_PATHS).toContain(path);
+  });
+
+  it('leaves the Google callback, session and sign-out endpoints reachable', () => {
+    expect(DISABLED_PATHS).not.toContain('/callback/google');
+    expect(DISABLED_PATHS).not.toContain('/get-session');
+    expect(DISABLED_PATHS).not.toContain('/sign-out');
   });
 });

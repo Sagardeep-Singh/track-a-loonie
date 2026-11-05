@@ -23,15 +23,14 @@
     "db:setup": "npm run prisma:generate && npm run prisma:migrate -- --name init && npm run prisma:seed:dev"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.11.3",
     "@prisma/client": "^6.19.3",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "bcryptjs": "^3.0.3",
+    "better-auth": "^1.7.12",
     "framer-motion": "^14.0.0",
     "lucide-react": "^1.43.0",
     "next": "16.3.4",
-    "next-auth": "^5.0.0-beta.32",
     "papaparse": "^5.7.0",
     "prisma": "^6.19.3",
     "react": "19.2.8",

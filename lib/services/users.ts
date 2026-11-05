@@ -2,9 +2,17 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
 import { Prisma } from '@prisma/client';
 import type { SignUpInput } from '@/lib/validators/signup';
-import { normalizeEmail } from '@/lib/validators/email';
 
 const BCRYPT_ROUNDS = 12;
+
+/** Better Auth's provider id for the email/password sign-in row, whose
+ * `accountId` is the user's own id. */
+export const CREDENTIAL_PROVIDER_ID = 'credential';
+
+const credentialKey = (userId: string): { providerId: string; accountId: string } => ({
+  providerId: CREDENTIAL_PROVIDER_ID,
+  accountId: userId,
+});
 
 export type CreateUserResult = { id: string; created: boolean };
 
@@ -32,10 +40,14 @@ export const createUser = async (input: SignUpInput): Promise<CreateUserResult> 
   }
 
   try {
-    const user = await prisma.user.create({
-      data: { email: input.email, name: input.name, passwordHash },
+    const id = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({ data: { email: input.email, name: input.name } });
+      await tx.authAccount.create({
+        data: { userId: user.id, ...credentialKey(user.id), password: passwordHash },
+      });
+      return user.id;
     });
-    return { id: user.id, created: true };
+    return { id, created: true };
   } catch (error) {
     // A concurrent signup for the same address won the race.
     if (isUniqueViolation(error)) {
@@ -51,34 +63,35 @@ export const createUser = async (input: SignUpInput): Promise<CreateUserResult> 
   }
 };
 
-export const userHasPassword = async (userId: string): Promise<boolean> => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { passwordHash: true },
+/** The bcrypt hash on the user's credential sign-in row, or null for a Google-only account. */
+export const getPasswordHash = async (
+  userId: string,
+  client: Prisma.TransactionClient = prisma,
+): Promise<string | null> => {
+  const account = await client.authAccount.findUnique({
+    where: { providerId_accountId: credentialKey(userId) },
+    select: { password: true },
   });
-  return !!user?.passwordHash;
+  return account?.password ?? null;
 };
 
-/**
- * Finds the user for a Google sign-in by email, provisioning a new
- * password-less account on first sign-in.
- */
-export const findOrCreateGoogleUser = async (
-  rawEmail: string,
-  name: string | null,
-): Promise<{ id: string }> => {
-  const email = normalizeEmail(rawEmail);
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    // A live Google sign-in vouches for the address just as well as our own
-    // emailed link — if the account got here via credentials signup and
-    // never clicked its link, this Google sign-in satisfies it too.
-    if (!existing.emailVerified) {
-      await prisma.user.update({ where: { id: existing.id }, data: { emailVerified: new Date() } });
-    }
-    return { id: existing.id };
-  }
+export const userHasPassword = async (userId: string): Promise<boolean> =>
+  (await getPasswordHash(userId)) !== null;
 
-  const user = await prisma.user.create({ data: { email, name, emailVerified: new Date() } });
-  return { id: user.id };
+/**
+ * Replaces the password and signs the user out everywhere, so a leaked old
+ * password or a stolen session doesn't outlive the change. Only for users
+ * who already have a credential row: setting a first password on a
+ * Google-only account isn't supported.
+ */
+export const replacePasswordHash = async (
+  tx: Prisma.TransactionClient,
+  userId: string,
+  passwordHash: string,
+): Promise<void> => {
+  await tx.authAccount.update({
+    where: { providerId_accountId: credentialKey(userId) },
+    data: { password: passwordHash },
+  });
+  await tx.session.deleteMany({ where: { userId } });
 };

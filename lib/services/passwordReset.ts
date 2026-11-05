@@ -13,6 +13,7 @@ import { buildPasswordResetGoogleEmail } from '@/lib/email/password-reset-google
 import { appBaseUrl } from '@/lib/http/appUrl';
 import { ServiceValidationError } from '@/lib/services/common';
 import { checkRateLimit, RateLimitedError } from '@/lib/services/rateLimit';
+import { getPasswordHash, replacePasswordHash } from '@/lib/services/users';
 import { normalizeEmail } from '@/lib/validators/email';
 import type { ResetPasswordInput } from '@/lib/validators/password';
 
@@ -118,14 +119,14 @@ export const requestPasswordReset = async (rawEmail: string): Promise<void> => {
 
   const user = await prisma.user.findUnique({
     where: { email },
-    select: { id: true, email: true, passwordHash: true },
+    select: { id: true, email: true },
   });
   if (!user) {
     log('info', 'request.no-account');
     return;
   }
 
-  if (!user.passwordHash) {
+  if (!(await getPasswordHash(user.id))) {
     log('info', 'request.google-only', { userId: user.id });
     await sendLogged('google-notice', user.id, {
       to: user.email,
@@ -197,8 +198,7 @@ export const getPasswordResetTokenStatus = async (
  * the mailbox, so an unverified address gets marked verified too (same
  * reasoning as `consumeVerificationToken`).
  *
- * Other devices stay signed in: sessions are JWTs with no server-side store
- * to revoke, same caveat as `changePassword`.
+ * Every existing session is signed out, same as `changePassword`.
  */
 export const resetPassword = async (input: ResetPasswordInput): Promise<{ ok: true }> => {
   const tokenHash = hashToken(input.token);
@@ -223,16 +223,13 @@ export const resetPassword = async (input: ResetPasswordInput): Promise<{ ok: tr
   // concurrent submits of the same link can't both succeed: the loser's
   // delete finds no row and rolls its password update back.
   try {
-    await prisma.$transaction([
-      prisma.passwordResetToken.delete({ where: { tokenHash } }),
-      prisma.user.update({
-        where: { id: token.userId },
-        data: {
-          passwordHash,
-          ...(token.user.emailVerified ? {} : { emailVerified: new Date() }),
-        },
-      }),
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await tx.passwordResetToken.delete({ where: { tokenHash } });
+      await replacePasswordHash(tx, token.userId, passwordHash);
+      if (!token.user.emailVerified) {
+        await tx.user.update({ where: { id: token.userId }, data: { emailVerified: true } });
+      }
+    });
   } catch (error) {
     if (isRecordNotFound(error)) {
       log('warn', 'reset.rejected', {

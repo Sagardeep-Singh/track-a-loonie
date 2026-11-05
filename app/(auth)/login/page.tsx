@@ -16,6 +16,16 @@ const VERIFY_MESSAGES: Record<string, { text: string; tone: 'success' | 'error' 
   },
 };
 
+// Better Auth sends failed Google sign-ins back here as `?error=<code>`.
+const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
+  // An existing account with this email whose address isn't verified yet:
+  // linking it to Google could hand it to whoever registered it.
+  account_not_linked:
+    "An account with this email already exists but isn't verified yet. Use the verification link we emailed you, or reset your password, then Google sign-in will work.",
+  access_denied: 'Google sign-in was cancelled.',
+};
+const GOOGLE_ERROR_FALLBACK = "Google sign-in didn't finish. Try again.";
+
 // Signup redirects here with the same `signup` value whether the email was
 // new or already registered (lib/auth/actions.ts), so this copy must never
 // imply one or the other.
@@ -32,9 +42,11 @@ const LoginPage = async ({
     passwordReset?: string;
     verify?: string;
     signup?: string;
+    error?: string;
   }>;
 }): Promise<React.ReactElement> => {
-  const { passwordChanged, passwordReset, verify, signup } = await searchParams;
+  const { passwordChanged, passwordReset, verify, signup, error } = await searchParams;
+  const googleError = error ? (GOOGLE_ERROR_MESSAGES[error] ?? GOOGLE_ERROR_FALLBACK) : undefined;
   const verifyMessage = verify ? VERIFY_MESSAGES[verify] : undefined;
   const signupMessage = signup ? SIGNUP_MESSAGES[signup] : undefined;
 
@@ -58,6 +70,11 @@ const LoginPage = async ({
           {signupMessage && (
             <p className="bg-sky-soft text-sky mb-4 rounded-lg px-3 py-2 text-sm" role="status">
               {signupMessage}
+            </p>
+          )}
+          {googleError && (
+            <p className="bg-rose-soft text-rose mb-4 rounded-lg px-3 py-2 text-sm" role="alert">
+              {googleError}
             </p>
           )}
           {verifyMessage && (

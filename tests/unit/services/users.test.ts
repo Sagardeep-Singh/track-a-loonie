@@ -19,17 +19,29 @@ const { prismaMock } = vi.hoisted(() => ({
     account: {
       create: vi.fn(),
     },
+    authAccount: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+    session: {
+      deleteMany: vi.fn(),
+    },
+    $transaction: vi.fn(),
   },
 }));
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: prismaMock }));
 
-const { createUser, findOrCreateGoogleUser, userHasPassword } =
+const { createUser, getPasswordHash, replacePasswordHash, userHasPassword } =
   await import('@/lib/services/users');
 const { DEFAULT_CATEGORIES } = await import('@/lib/services/defaults');
 
 beforeEach(() => {
   vi.clearAllMocks();
+  prismaMock.$transaction.mockImplementation((fn: (tx: typeof prismaMock) => unknown) =>
+    fn(prismaMock),
+  );
   prismaMock.category.findMany.mockResolvedValue(
     DEFAULT_CATEGORIES.map((name, i) => ({ id: `cat-${i}`, name })),
   );
@@ -74,7 +86,7 @@ describe('createUser', () => {
     await expect(createUser(input)).rejects.toThrow('db down');
   });
 
-  it('hashes the password and creates the user with no prepopulated data', async () => {
+  it('creates the user and a credential row with the bcrypt hash, and no prepopulated data', async () => {
     prismaMock.user.findUnique.mockResolvedValue(null);
     prismaMock.user.create.mockResolvedValue({ id: 'user-1' });
 
@@ -82,10 +94,18 @@ describe('createUser', () => {
 
     expect(result).toEqual({ id: 'user-1', created: true });
 
-    const [createArg] = prismaMock.user.create.mock.calls[0];
-    expect(createArg.data.email).toBe('jane@example.com');
-    expect(createArg.data.name).toBe('Jane');
-    expect(createArg.data.passwordHash).not.toBe('a-long-enough-password');
+    expect(prismaMock.user.create).toHaveBeenCalledWith({
+      data: { email: 'jane@example.com', name: 'Jane' },
+    });
+    const [accountArg] = prismaMock.authAccount.create.mock.calls[0];
+    expect(accountArg.data).toMatchObject({
+      userId: 'user-1',
+      providerId: 'credential',
+      accountId: 'user-1',
+    });
+    await expect(bcrypt.compare('a-long-enough-password', accountArg.data.password)).resolves.toBe(
+      true,
+    );
 
     expect(prismaMock.category.createMany).not.toHaveBeenCalled();
     expect(prismaMock.categoryRule.createMany).not.toHaveBeenCalled();
@@ -93,77 +113,46 @@ describe('createUser', () => {
   });
 });
 
-describe('findOrCreateGoogleUser', () => {
-  it('returns an already-verified existing user without touching it', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', emailVerified: new Date() });
+describe('getPasswordHash', () => {
+  it('reads the credential row keyed by the user id', async () => {
+    prismaMock.authAccount.findUnique.mockResolvedValue({ password: 'hashed' });
 
-    const result = await findOrCreateGoogleUser('jane@example.com', 'Jane');
-
-    expect(result).toEqual({ id: 'user-1' });
-    expect(prismaMock.user.create).not.toHaveBeenCalled();
-    expect(prismaMock.user.update).not.toHaveBeenCalled();
-    expect(prismaMock.account.create).not.toHaveBeenCalled();
-  });
-
-  it('looks up and creates by the normalized address', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(null);
-    prismaMock.user.create.mockResolvedValue({ id: 'user-2' });
-
-    await findOrCreateGoogleUser(' Jane@Example.COM ', 'Jane');
-
-    expect(prismaMock.user.findUnique).toHaveBeenCalledWith({
-      where: { email: 'jane@example.com' },
-    });
-    expect(prismaMock.user.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ email: 'jane@example.com' }),
+    await expect(getPasswordHash('user-1')).resolves.toBe('hashed');
+    expect(prismaMock.authAccount.findUnique).toHaveBeenCalledWith({
+      where: { providerId_accountId: { providerId: 'credential', accountId: 'user-1' } },
+      select: { password: true },
     });
   });
 
-  it('marks an existing unverified user verified — a live Google sign-in vouches for the address', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', emailVerified: null });
+  it('returns null when there is no credential row (Google-only account)', async () => {
+    prismaMock.authAccount.findUnique.mockResolvedValue(null);
 
-    const result = await findOrCreateGoogleUser('jane@example.com', 'Jane');
-
-    expect(result).toEqual({ id: 'user-1' });
-    expect(prismaMock.user.update).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
-      data: { emailVerified: expect.any(Date) },
-    });
-    expect(prismaMock.user.create).not.toHaveBeenCalled();
+    await expect(getPasswordHash('user-1')).resolves.toBeNull();
   });
+});
 
-  it('creates a verified, password-less user on first sign-in with no prepopulated data', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(null);
-    prismaMock.user.create.mockResolvedValue({ id: 'user-2' });
+describe('replacePasswordHash', () => {
+  it("updates the credential row and deletes every one of the user's sessions", async () => {
+    await replacePasswordHash(prismaMock as never, 'user-1', 'new-hash');
 
-    const result = await findOrCreateGoogleUser('new@example.com', 'New Person');
-
-    expect(result).toEqual({ id: 'user-2' });
-    expect(prismaMock.user.create).toHaveBeenCalledWith({
-      data: { email: 'new@example.com', name: 'New Person', emailVerified: expect.any(Date) },
+    expect(prismaMock.authAccount.update).toHaveBeenCalledWith({
+      where: { providerId_accountId: { providerId: 'credential', accountId: 'user-1' } },
+      data: { password: 'new-hash' },
     });
-    expect(prismaMock.category.createMany).not.toHaveBeenCalled();
-    expect(prismaMock.categoryRule.createMany).not.toHaveBeenCalled();
-    expect(prismaMock.account.create).not.toHaveBeenCalled();
+    expect(prismaMock.session.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
   });
 });
 
 describe('userHasPassword', () => {
-  it('returns true when the user has a passwordHash', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ passwordHash: 'hashed' });
+  it('returns true when the user has a credential row with a password', async () => {
+    prismaMock.authAccount.findUnique.mockResolvedValue({ password: 'hashed' });
 
     await expect(userHasPassword('user-1')).resolves.toBe(true);
   });
 
-  it('returns false for a Google-only user with no passwordHash', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ passwordHash: null });
+  it('returns false for a Google-only user with no credential row', async () => {
+    prismaMock.authAccount.findUnique.mockResolvedValue(null);
 
     await expect(userHasPassword('user-1')).resolves.toBe(false);
-  });
-
-  it('returns false when the user does not exist', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(null);
-
-    await expect(userHasPassword('missing')).resolves.toBe(false);
   });
 });

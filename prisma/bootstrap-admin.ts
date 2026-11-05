@@ -15,10 +15,17 @@ const main = async (): Promise<void> => {
   const passwordHash = await bcrypt.hash(password, 12);
   const existing = await prisma.user.findUnique({ where: { email } });
 
-  const user = await prisma.user.upsert({
-    where: { email },
-    update: { passwordHash },
-    create: { email, passwordHash },
+  const user = await prisma.user.upsert({ where: { email }, update: {}, create: { email } });
+  // Better Auth's email/password sign-in row (lib/services/users.ts).
+  await prisma.authAccount.upsert({
+    where: { providerId_accountId: { providerId: 'credential', accountId: user.id } },
+    update: { password: passwordHash },
+    create: {
+      userId: user.id,
+      providerId: 'credential',
+      accountId: user.id,
+      password: passwordHash,
+    },
   });
 
   if (!existing) {

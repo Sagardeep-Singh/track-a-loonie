@@ -4,11 +4,11 @@ import { appBaseUrl } from '@/lib/http/appUrl';
 const env = (vars: Record<string, string>): NodeJS.ProcessEnv => vars as NodeJS.ProcessEnv;
 
 describe('appBaseUrl', () => {
-  it('prefers NEXTAUTH_URL, without a trailing slash', () => {
+  it('prefers BETTER_AUTH_URL, without a trailing slash', () => {
     expect(
       appBaseUrl(
         env({
-          NEXTAUTH_URL: 'https://ledger.example/',
+          BETTER_AUTH_URL: 'https://ledger.example/',
           VERCEL_ENV: 'production',
           VERCEL_PROJECT_PRODUCTION_URL: 'other.example',
         }),
@@ -16,7 +16,7 @@ describe('appBaseUrl', () => {
     ).toBe('https://ledger.example');
   });
 
-  it('uses the Vercel production domain in production when NEXTAUTH_URL is unset', () => {
+  it('uses the Vercel production domain in production when BETTER_AUTH_URL is unset', () => {
     expect(
       appBaseUrl(
         env({

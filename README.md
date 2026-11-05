@@ -9,13 +9,13 @@ isolated space. Every service scopes its data by user, so accounts stay fully se
 
 ## Stack
 
-Next.js App Router, TypeScript, Prisma + Postgres, NextAuth (credentials + Google), Tailwind
+Next.js App Router, TypeScript, Prisma + Postgres, Better Auth (credentials + Google), Tailwind
 CSS v4, Zod, Vitest.
 
 ## Getting started
 
 ```bash
-cp .env.example .env   # fill in DATABASE_URL, NEXTAUTH_SECRET
+cp .env.example .env   # fill in DATABASE_URL, BETTER_AUTH_SECRET
 npm install
 npm run db:setup       # prisma generate + migrate + seed (destructive, local dev only)
 npm run dev

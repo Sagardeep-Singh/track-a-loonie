@@ -23,26 +23,39 @@ Why now: 2FA and passkeys are the next auth features. NextAuth has no 2FA, and i
 - A "manage sessions" UI. The data will exist, the screen is a later feature.
 - New UI of any kind. Login, signup, reset and settings screens stay as they are.
 
+## What changed during implementation
+
+The decisions below were the plan. Implementation kept Better Auth's footprint smaller, so a few rows no longer hold:
+
+- **Better Auth only handles sign-in, Google OAuth and sessions.** Signup (`createUser`), email verification, password reset and change password stay on our existing services, which already had the no-enumeration responses, per-address caps, token prechecks and logging. They now write the password to the `AuthAccount` credential row, and reset and change password delete all of the user's `Session` rows. That replaces the Signup, Email verification, Password reset, Token storage and Change password rows below.
+- **`EmailVerificationToken` and `PasswordResetToken` stay.** Not dropping them made the migration smaller, and emailed links that already exist keep working. The `Verification` table is still created, for Better Auth's OAuth state.
+- **More paths are disabled over HTTP** than the table lists: everything the app doesn't call through Better Auth's router (see `DISABLED_PATHS` in `lib/auth/auth.ts`), including `/sign-in/social`, which the server actions call through `auth.api`.
+- **Session timestamp** is exposed as `session.user.signedInAt`, not `sessionCreatedAt`.
+- **`getServerAuthSession` reads cookies through `cookies()`**, not the raw Cookie header. Right after the sign-in action redirects, the dashboard renders in the same response and only `cookies()` already holds the new session cookie.
+- **`BETTER_AUTH_URL` replaces `NEXTAUTH_URL`** in `lib/http/appUrl.ts`, which is also passed to Better Auth as `baseURL`.
+- **`User.name` stays nullable.** `getSession` returns a null name fine.
+- **Google errors** come back as `/login?error=<code>`. The login page shows a specific message for `account_not_linked` (open question 1, accepted) and for a cancelled sign-in, and a generic one otherwise.
+
 ## Decisions
 
-| Area | Decision |
-| --- | --- |
-| Table names | Better Auth `account` model maps to Prisma `AuthAccount` (`account.modelName`). `user` stays `User`, `session` becomes `Session`, `verification` becomes `Verification`. No clash with the bank `Account` model. |
-| IDs | Keep `cuid()` defaults. Set `advanced.database.generateId: false` so Prisma generates IDs. |
-| Password storage | `User.passwordHash` moves to an `AuthAccount` row (`providerId: 'credential'`, `accountId: userId`, `password: <bcrypt hash>`). Hash and verify stay bcrypt, 12 rounds. |
-| Sessions | Database sessions, `expiresIn` 7 days, `updateAge` 1 day. **No `cookieCache`**: it would let a deleted user's other devices keep working until the cache expires, which breaks the "delete takes effect everywhere immediately" rule in `lib/auth/config.ts`. Deleting a `User` cascades to `Session`, so a DB session lookup gives us that rule for free. |
-| Server actions stay | Login, signup, reset, etc. stay as server actions in `lib/auth/actions.ts` and call `auth.api.*` with the `nextCookies()` plugin. Components and form contracts don't change. |
-| Rate limiting | Keep `lib/services/rateLimit.ts` and the existing limits in the server actions. Better Auth's limiter doesn't run on server-side `auth.api.*` calls, and its default storage is in-memory (wrong for more than one instance). |
-| Raw HTTP endpoints | Add `/sign-in/email`, `/sign-up/email`, `/request-password-reset`, `/reset-password`, `/change-password`, `/send-verification-email` and `/delete-user` to `disabledPaths` so nobody can call them directly and skip our rate limits and enumeration rules. `disabledPaths` only blocks the HTTP router, `auth.api.*` still works. `/api/auth/*` stays mounted for the Google callback, `get-session` and `sign-out`. |
-| Signup | `autoSignIn: false` and `onExistingUserSignUp` sends the existing "account already exists" email. Same response for new and taken emails, no auto sign-in, same as today. `requireEmailVerification: false`: verification still never gates access. |
-| Email verification | Better Auth's `sendVerificationEmail` hook calls our existing Brevo template. `sendOnSignUp: true`. The emailed link moves to Better Auth's `/api/auth/verify-email` with `callbackURL` pointing at `/login?verify=…`. Resend button keeps working through a server action. |
-| Password reset | Better Auth's `sendResetPassword` hook calls our Brevo template with a link to our existing `/reset-password?token=…` page. In the hook: skip silently past 3 sends/hour per address (`checkRateLimit`), and send the "sign in with Google" email instead if the user has no credential account, without the token. `onPasswordReset` stamps `emailVerified` (a used link proves mailbox control, same as today). `revokeSessionsOnPasswordReset: true`. |
-| Token storage | `verification.storeIdentifier: 'hashed'`, so reset tokens aren't stored in plain text (we store SHA-256 today). |
-| Change password | `auth.api.changePassword` with `revokeOtherSessions: true`. Keep our validator and the "Google-only account has no password" and "new must differ" errors in `lib/services/password.ts`. |
-| Google linking | `accountLinking.trustedProviders: ['google']`. Existing Google-only users already have `emailVerified` set, so their first Better Auth sign-in links a new `AuthAccount` row by email. Google's redirect URI stays `/api/auth/callback/google`, so the Google console needs no change. |
-| Google re-auth for deletion | Replace the `reauthenticatedAt` JWT claim with the session's `createdAt`. A re-auth makes a new session, so "session created in the last 5 minutes" is the same proof. `signInSocial` returns the Google URL, and we append `prompt=login` before redirecting, since Better Auth only sets `prompt` per provider. |
-| Session helpers | `getServerAuthSession`, `requireSession` and `requireUserId` in `lib/auth/session.ts` keep their signatures and wrap `auth.api.getSession({ headers })`. The ~60 call sites don't change. |
-| Env vars | `BETTER_AUTH_SECRET` (new, generate fresh) and `BETTER_AUTH_URL`. `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` stay and are passed in explicitly. Drop `AUTH_SECRET` after cutover. |
+| Area                        | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Table names                 | Better Auth `account` model maps to Prisma `AuthAccount` (`account.modelName`). `user` stays `User`, `session` becomes `Session`, `verification` becomes `Verification`. No clash with the bank `Account` model.                                                                                                                                                                                                                                         |
+| IDs                         | Keep `cuid()` defaults. Set `advanced.database.generateId: false` so Prisma generates IDs.                                                                                                                                                                                                                                                                                                                                                               |
+| Password storage            | `User.passwordHash` moves to an `AuthAccount` row (`providerId: 'credential'`, `accountId: userId`, `password: <bcrypt hash>`). Hash and verify stay bcrypt, 12 rounds.                                                                                                                                                                                                                                                                                  |
+| Sessions                    | Database sessions, `expiresIn` 7 days, `updateAge` 1 day. **No `cookieCache`**: it would let a deleted user's other devices keep working until the cache expires, which breaks the "delete takes effect everywhere immediately" rule in `lib/auth/config.ts`. Deleting a `User` cascades to `Session`, so a DB session lookup gives us that rule for free.                                                                                               |
+| Server actions stay         | Login, signup, reset, etc. stay as server actions in `lib/auth/actions.ts` and call `auth.api.*` with the `nextCookies()` plugin. Components and form contracts don't change.                                                                                                                                                                                                                                                                            |
+| Rate limiting               | Keep `lib/services/rateLimit.ts` and the existing limits in the server actions. Better Auth's limiter doesn't run on server-side `auth.api.*` calls, and its default storage is in-memory (wrong for more than one instance).                                                                                                                                                                                                                            |
+| Raw HTTP endpoints          | Add `/sign-in/email`, `/sign-up/email`, `/request-password-reset`, `/reset-password`, `/change-password`, `/send-verification-email` and `/delete-user` to `disabledPaths` so nobody can call them directly and skip our rate limits and enumeration rules. `disabledPaths` only blocks the HTTP router, `auth.api.*` still works. `/api/auth/*` stays mounted for the Google callback, `get-session` and `sign-out`.                                    |
+| Signup                      | `autoSignIn: false` and `onExistingUserSignUp` sends the existing "account already exists" email. Same response for new and taken emails, no auto sign-in, same as today. `requireEmailVerification: false`: verification still never gates access.                                                                                                                                                                                                      |
+| Email verification          | Better Auth's `sendVerificationEmail` hook calls our existing Brevo template. `sendOnSignUp: true`. The emailed link moves to Better Auth's `/api/auth/verify-email` with `callbackURL` pointing at `/login?verify=…`. Resend button keeps working through a server action.                                                                                                                                                                              |
+| Password reset              | Better Auth's `sendResetPassword` hook calls our Brevo template with a link to our existing `/reset-password?token=…` page. In the hook: skip silently past 3 sends/hour per address (`checkRateLimit`), and send the "sign in with Google" email instead if the user has no credential account, without the token. `onPasswordReset` stamps `emailVerified` (a used link proves mailbox control, same as today). `revokeSessionsOnPasswordReset: true`. |
+| Token storage               | `verification.storeIdentifier: 'hashed'`, so reset tokens aren't stored in plain text (we store SHA-256 today).                                                                                                                                                                                                                                                                                                                                          |
+| Change password             | `auth.api.changePassword` with `revokeOtherSessions: true`. Keep our validator and the "Google-only account has no password" and "new must differ" errors in `lib/services/password.ts`.                                                                                                                                                                                                                                                                 |
+| Google linking              | `accountLinking.trustedProviders: ['google']`. Existing Google-only users already have `emailVerified` set, so their first Better Auth sign-in links a new `AuthAccount` row by email. Google's redirect URI stays `/api/auth/callback/google`, so the Google console needs no change.                                                                                                                                                                   |
+| Google re-auth for deletion | Replace the `reauthenticatedAt` JWT claim with the session's `createdAt`. A re-auth makes a new session, so "session created in the last 5 minutes" is the same proof. `signInSocial` returns the Google URL, and we append `prompt=login` before redirecting, since Better Auth only sets `prompt` per provider.                                                                                                                                        |
+| Session helpers             | `getServerAuthSession`, `requireSession` and `requireUserId` in `lib/auth/session.ts` keep their signatures and wrap `auth.api.getSession({ headers })`. The ~60 call sites don't change.                                                                                                                                                                                                                                                                |
+| Env vars                    | `BETTER_AUTH_SECRET` (new, generate fresh) and `BETTER_AUTH_URL`. `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` stay and are passed in explicitly. Drop `AUTH_SECRET` after cutover.                                                                                                                                                                                                                                                                           |
 
 ## Schema impact (needs sign-off)
 
@@ -57,7 +70,7 @@ One migration, `better_auth_migration`:
 - New `Session`: `id, token @unique, userId, expiresAt, ipAddress?, userAgent?, createdAt, updatedAt`. `@@index([userId])`, cascade on user delete.
 - New `Verification`: `id, identifier, value, expiresAt, createdAt, updatedAt`. `@@index([identifier])`.
 - Data step: `INSERT INTO "AuthAccount" (id, "userId", "accountId", "providerId", password, …) SELECT …, id, id, 'credential', "passwordHash" … FROM "User" WHERE "passwordHash" IS NOT NULL`.
-- Drop `EmailVerificationToken` and `PasswordResetToken`.
+- ~~Drop `EmailVerificationToken` and `PasswordResetToken`.~~ Kept, see above.
 - `RateLimitBucket` stays.
 
 `User.name` stays nullable. Better Auth types it as required, but we always pass a name on signup and Google provides one. Check during implementation that `getSession` returns a null name without throwing; if it doesn't work, backfill `name` from the email local part and make it required (another schema decision, raise first).
@@ -65,10 +78,14 @@ One migration, `better_auth_migration`:
 ## Cutover effects (accepted unless flagged)
 
 - Everyone is signed out once (old JWT cookies mean nothing to Better Auth).
-- Verification and reset links already sitting in inboxes stop working. Both flows have a resend path.
+- ~~Verification and reset links already sitting in inboxes stop working.~~ They keep working, since those token tables stay.
+- `BETTER_AUTH_SECRET` must be set before deploying. Better Auth refuses to run in production without it.
+- Google sign-in uses `appBaseUrl()` as its redirect origin. Previews reached through a deployment URL rather than the branch URL won't complete Google sign-in (email/password is unaffected).
 - Take a DB backup before `prisma migrate deploy`. There's no down migration. Rolling back means restoring the backup and redeploying the previous build.
 
 ## Open questions
+
+Both resolved: 1 was accepted, 2 carries into the 2FA plan.
 
 1. **Unverified credentials user signs in with Google.** Today that links the accounts and marks the email verified (`findOrCreateGoogleUser`). Better Auth refuses to link when the local row is unverified (`requireLocalEmailVerified`, defaults to on and becomes mandatory in the next minor). That refusal closes an account-takeover hole: someone pre-registers a victim's email with a password, then the victim's Google sign-in gets linked into it. **Recommendation:** accept it. The user verifies their email (or resets the password) once and Google linking works after that. Login page needs an error message for this case.
 2. **2FA and Google sign-in (step 2, noted now).** Better Auth's `twoFactor` plugin only challenges email/password sign-ins, so Google sign-ins skip TOTP. That fits "optional TOTP" but should be stated in the step 2 plan.
@@ -112,16 +129,16 @@ E2E (`tests/e2e/...`), must pass unchanged: `login`, `signup`, `email-verificati
 
 ## Checklist
 
-- [ ] Sign-off on schema changes and open question 1
-- [ ] product-manager pass to confirm the behavior parity list
-- [ ] software-architect review of this plan
-- [ ] tester writes the unit and e2e test plans against it
-- [ ] Add packages, write `lib/auth/auth.ts` and the catch-all route
-- [ ] Schema + migration with the credential backfill, tested against a copy of real data
-- [ ] Session helpers and server actions on `auth.api.*`
-- [ ] Email verification and password reset hooks
-- [ ] Change password, account deletion, Google re-auth
-- [ ] Seed and bootstrap scripts
-- [ ] Remove NextAuth packages and dead code
-- [ ] Unit and e2e tests green, `npm run format:fix && npm run lint` clean
-- [ ] Deploy notes: backup, new env vars, everyone signed out once
+- [x] Sign-off on schema changes and open question 1
+- [ ] product-manager pass to confirm the behavior parity list (skipped: plan was reviewed directly)
+- [ ] software-architect review of this plan (skipped, same reason)
+- [x] Test plan (above) used as the acceptance bar
+- [x] Add packages, write `lib/auth/auth.ts` and the catch-all route
+- [x] Schema + migration with the credential backfill, tested against sample data (password, Google-only and unverified users)
+- [x] Session helpers and server actions on `auth.api.*`
+- [x] Email verification and password reset write to the new storage and revoke sessions
+- [x] Change password, account deletion, Google re-auth
+- [x] Seed and bootstrap scripts
+- [x] Remove NextAuth packages and dead code
+- [x] Unit and e2e tests green, `npm run format:fix && npm run lint` clean
+- [ ] Deploy: DB backup, set `BETTER_AUTH_SECRET` (and `BETTER_AUTH_URL` if `NEXTAUTH_URL` was set), run `prisma migrate deploy`, expect everyone to sign in once

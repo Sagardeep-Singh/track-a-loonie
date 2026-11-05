@@ -39,7 +39,7 @@ const SettingsPage = async (): Promise<React.ReactElement> => {
       <SettingsView
         email={session!.user.email ?? ''}
         hasPassword={hasPassword}
-        googleReauthenticatedAt={session!.user.reauthenticatedAt}
+        googleReauthenticatedAt={session!.user.signedInAt}
         // Read on the server so a deployment without VAPID keys renders the
         // unavailable copy in the first HTML, not after a client-side check.
         remindersAvailable={Boolean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)}

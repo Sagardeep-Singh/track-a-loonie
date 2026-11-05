@@ -2,8 +2,8 @@
 
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { signIn, signOut } from '@/auth';
-import { AuthError } from 'next-auth';
+import { APIError } from 'better-auth/api';
+import { auth } from '@/lib/auth/auth';
 import { createUser } from '@/lib/services/users';
 import { signUpSchema } from '@/lib/validators/signup';
 import { forgotPasswordSchema, resetPasswordSchema } from '@/lib/validators/password';
@@ -11,7 +11,7 @@ import { ServiceValidationError } from '@/lib/services/common';
 import { requestPasswordReset, resetPassword } from '@/lib/services/passwordReset';
 import { checkRateLimit, RateLimitedError } from '@/lib/services/rateLimit';
 import { clientIpFromHeaders } from '@/lib/http/clientIp';
-import { AuthRateLimitedError } from '@/lib/auth/errors';
+import { normalizeEmail } from '@/lib/validators/email';
 import {
   isEmailVerificationConfigured,
   issueAndSendVerificationEmail,
@@ -20,10 +20,17 @@ import {
 
 const TOO_MANY_ATTEMPTS = 'Too many attempts. Try again in a few minutes.';
 
+// Credential-stuffing/brute-force guard for the one unauthenticated action
+// that checks a password. Two scopes so a single leaked-password list run
+// against many emails (IP-scoped) and repeated guesses against one account
+// (email-scoped) are both bounded, independently of each other.
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_EMAIL_LIMIT = 10;
+const LOGIN_IP_LIMIT = 30;
+
 // Account-creation abuse guard: bounds how many accounts one source can spin
-// up, independent of the tighter per-login-attempt limits in
-// lib/auth/config.ts (signup is a rarer action than login, so a looser
-// window with a lower cap is enough).
+// up, independent of the tighter per-login-attempt limits above (signup is
+// a rarer action than login, so a looser window with a lower cap is enough).
 const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
 const SIGNUP_IP_LIMIT = 5;
 
@@ -32,58 +39,105 @@ const SIGNUP_IP_LIMIT = 5;
 const PASSWORD_RESET_WINDOW_MS = 60 * 60 * 1000;
 const PASSWORD_RESET_IP_LIMIT = 10;
 
-// See lib/auth/config.ts's matching flag — same reasoning, the e2e suite
-// creates far more accounts per run than any real signup source would.
+// The e2e suite logs in as the same dev user dozens of times per run across
+// many specs and creates far more accounts than any real signup source
+// would. These limits exist to stop abuse, not a shared-account test suite.
+// Server-only env var, read once at module load, never request input.
 const rateLimitDisabled = process.env.E2E_DISABLE_RATE_LIMIT === '1';
 
+const signOutTo = async (redirectTo: string): Promise<never> => {
+  await auth.api.signOut({ headers: await headers() });
+  redirect(redirectTo);
+};
+
 export const signOutAction = async (): Promise<void> => {
-  await signOut({ redirectTo: '/login' });
+  await signOutTo('/login');
 };
 
 export const signOutAfterPasswordChange = async (): Promise<void> => {
-  await signOut({ redirectTo: '/login?passwordChanged=1' });
+  await signOutTo('/login?passwordChanged=1');
 };
 
 export const signOutAfterAccountDeletion = async (): Promise<void> => {
-  await signOut({ redirectTo: '/login?accountDeleted=1' });
+  await signOutTo('/login?accountDeleted=1');
+};
+
+/**
+ * Starts a Google sign-in and sends the browser to Google. Errors (e.g. a
+ * Google account whose email matches an unverified local account, which
+ * Better Auth refuses to link) come back to `errorCallbackURL` as `?error=`.
+ */
+const redirectToGoogle = async (
+  callbackURL: string,
+  options: { forceLogin?: boolean } = {},
+): Promise<never> => {
+  const { url } = await auth.api.signInSocial({
+    body: { provider: 'google', callbackURL, errorCallbackURL: '/login' },
+    headers: await headers(),
+  });
+  if (!url) {
+    throw new Error('Google sign-in did not return a redirect URL.');
+  }
+  const target = new URL(url);
+  if (options.forceLogin) {
+    target.searchParams.set('prompt', 'login');
+  }
+  redirect(target.toString());
 };
 
 /**
  * Forces Google to re-show its authentication screen even when its own IdP
- * session cookie is still active — `prompt: 'login'` is what makes this a
- * real "prove you still control this account" step rather than a no-op
- * redirect that `select_account` alone would be. The `jwt` callback stamps
- * `token.reauthenticatedAt` on every completed Google sign-in, this one
- * included, which is what `deleteUserAccount` checks for a Google-only user
+ * session cookie is still active — `prompt=login` is what makes this a real
+ * "prove you still control this account" step rather than a no-op redirect
+ * that `select_account` alone would be. Better Auth only sets `prompt` per
+ * provider, so it's added to the authorization URL here. Completing it
+ * creates a new session, and that session's age is what
+ * `deleteUserAccount` checks for a Google-only user
  * (lib/services/accountDeletion.ts).
  */
 export const reauthenticateWithGoogleAction = async (): Promise<void> => {
-  await signIn('google', { redirectTo: '/settings' }, { prompt: 'login' });
+  await redirectToGoogle('/settings', { forceLogin: true });
 };
 
 export const signInAction = async (
   _prevState: string | undefined,
   formData: FormData,
 ): Promise<string | undefined> => {
-  try {
-    await signIn('credentials', {
-      email: formData.get('email'),
-      password: formData.get('password'),
-      redirectTo: '/dashboard',
-    });
-  } catch (error) {
-    if (error instanceof AuthRateLimitedError) {
-      return TOO_MANY_ATTEMPTS;
+  const rawEmail = formData.get('email');
+  const password = formData.get('password');
+  if (typeof rawEmail !== 'string' || typeof password !== 'string') {
+    return 'Incorrect email or password.';
+  }
+  const email = normalizeEmail(rawEmail);
+
+  // Checked before the user lookup so a guess against a nonexistent email
+  // still counts — otherwise account enumeration would be free.
+  if (!rateLimitDisabled) {
+    const ip = clientIpFromHeaders(await headers());
+    try {
+      await checkRateLimit('login:ip', ip, LOGIN_IP_LIMIT, LOGIN_WINDOW_MS);
+      await checkRateLimit('login:email', email, LOGIN_EMAIL_LIMIT, LOGIN_WINDOW_MS);
+    } catch (error) {
+      if (error instanceof RateLimitedError) {
+        return TOO_MANY_ATTEMPTS;
+      }
+      throw error;
     }
-    if (error instanceof AuthError) {
+  }
+
+  try {
+    await auth.api.signInEmail({ body: { email, password }, headers: await headers() });
+  } catch (error) {
+    if (error instanceof APIError) {
       return 'Incorrect email or password.';
     }
     throw error;
   }
+  redirect('/dashboard');
 };
 
 export const signInWithGoogleAction = async (): Promise<void> => {
-  await signIn('google', { redirectTo: '/dashboard' });
+  await redirectToGoogle('/dashboard');
 };
 
 export const signUpAction = async (

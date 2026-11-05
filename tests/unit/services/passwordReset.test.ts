@@ -2,28 +2,41 @@ import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 
-const { prismaMock, sendEmailMock, isEmailConfiguredMock, checkRateLimitMock, bcryptHashMock } =
-  vi.hoisted(() => ({
-    prismaMock: {
-      passwordResetToken: {
-        upsert: vi.fn(),
-        findUnique: vi.fn(),
-        delete: vi.fn(),
-      },
-      user: {
-        update: vi.fn(),
-        findUnique: vi.fn(),
-      },
-      $transaction: vi.fn(),
+const {
+  prismaMock,
+  sendEmailMock,
+  isEmailConfiguredMock,
+  checkRateLimitMock,
+  bcryptHashMock,
+  getPasswordHashMock,
+  replacePasswordHashMock,
+} = vi.hoisted(() => ({
+  prismaMock: {
+    passwordResetToken: {
+      upsert: vi.fn(),
+      findUnique: vi.fn(),
+      delete: vi.fn(),
     },
-    sendEmailMock: vi.fn(),
-    isEmailConfiguredMock: vi.fn(),
-    checkRateLimitMock: vi.fn(),
-    bcryptHashMock: vi.fn(),
-  }));
+    user: {
+      update: vi.fn(),
+      findUnique: vi.fn(),
+    },
+    $transaction: vi.fn(),
+  },
+  sendEmailMock: vi.fn(),
+  isEmailConfiguredMock: vi.fn(),
+  checkRateLimitMock: vi.fn(),
+  bcryptHashMock: vi.fn(),
+  getPasswordHashMock: vi.fn(),
+  replacePasswordHashMock: vi.fn(),
+}));
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: prismaMock }));
 vi.mock('bcryptjs', () => ({ default: { hash: bcryptHashMock } }));
+vi.mock('@/lib/services/users', () => ({
+  getPasswordHash: getPasswordHashMock,
+  replacePasswordHash: replacePasswordHashMock,
+}));
 vi.mock('@/lib/services/rateLimit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/services/rateLimit')>()),
   checkRateLimit: checkRateLimitMock,
@@ -61,7 +74,14 @@ beforeEach(() => {
   checkRateLimitMock.mockResolvedValue(undefined);
   sendEmailMock.mockResolvedValue({ messageId: '<msg-1@brevo>' });
   bcryptHashMock.mockResolvedValue('new-hash');
-  prismaMock.$transaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
+  prismaMock.$transaction.mockImplementation(
+    async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock),
+  );
+  // User fixtures below carry the `passwordHash` their credential row would
+  // hold; the credential lookup answers from whichever user was looked up.
+  getPasswordHashMock.mockImplementation(
+    async () => (await prismaMock.user.findUnique.mock.results.at(-1)?.value)?.passwordHash ?? null,
+  );
 });
 
 describe('requestPasswordReset', () => {
@@ -213,14 +233,14 @@ describe('resetPassword', () => {
 
     await expect(resetPassword(input)).rejects.toThrow(ServiceValidationError);
     await expect(resetPassword(input)).rejects.toThrow('invalid or has already been used');
-    expect(prismaMock.user.update).not.toHaveBeenCalled();
+    expect(replacePasswordHashMock).not.toHaveBeenCalled();
   });
 
   it('deletes an expired token and throws without touching the password', async () => {
     prismaMock.passwordResetToken.findUnique.mockResolvedValue({
       userId: 'user-1',
       expiresAt: new Date(Date.now() - 1000),
-      user: { emailVerified: null },
+      user: { emailVerified: false },
     });
 
     await expect(resetPassword(input)).rejects.toThrow('has expired');
@@ -228,14 +248,14 @@ describe('resetPassword', () => {
     expect(prismaMock.passwordResetToken.delete).toHaveBeenCalledWith({
       where: { userId: 'user-1' },
     });
-    expect(prismaMock.user.update).not.toHaveBeenCalled();
+    expect(replacePasswordHashMock).not.toHaveBeenCalled();
   });
 
   it('hashes the new password, deletes the token and marks an unverified email verified', async () => {
     prismaMock.passwordResetToken.findUnique.mockResolvedValue({
       userId: 'user-1',
       expiresAt: new Date(Date.now() + HOUR_MS),
-      user: { emailVerified: null },
+      user: { emailVerified: false },
     });
 
     await expect(resetPassword(input)).resolves.toEqual({ ok: true });
@@ -244,33 +264,32 @@ describe('resetPassword', () => {
     expect(prismaMock.passwordResetToken.delete).toHaveBeenCalledWith({
       where: { tokenHash: sha256('raw') },
     });
+    expect(replacePasswordHashMock).toHaveBeenCalledWith(prismaMock, 'user-1', 'new-hash');
     expect(prismaMock.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
-      data: { passwordHash: 'new-hash', emailVerified: expect.any(Date) },
+      data: { emailVerified: true },
     });
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves an existing emailVerified date alone', async () => {
+  it('leaves an already-verified email alone', async () => {
     prismaMock.passwordResetToken.findUnique.mockResolvedValue({
       userId: 'user-1',
       expiresAt: new Date(Date.now() + HOUR_MS),
-      user: { emailVerified: new Date('2026-01-01') },
+      user: { emailVerified: true },
     });
 
     await resetPassword(input);
 
-    expect(prismaMock.user.update).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
-      data: { passwordHash: 'new-hash' },
-    });
+    expect(replacePasswordHashMock).toHaveBeenCalledWith(prismaMock, 'user-1', 'new-hash');
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
   });
 
   it('reports a link used concurrently as invalid rather than a raw Prisma error', async () => {
     prismaMock.passwordResetToken.findUnique.mockResolvedValue({
       userId: 'user-1',
       expiresAt: new Date(Date.now() + HOUR_MS),
-      user: { emailVerified: null },
+      user: { emailVerified: false },
     });
     prismaMock.$transaction.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('not found', {
@@ -395,7 +414,7 @@ describe('logging', () => {
     prismaMock.passwordResetToken.findUnique.mockResolvedValueOnce({
       userId: 'user-1',
       expiresAt: new Date(Date.now() + HOUR_MS),
-      user: { emailVerified: null },
+      user: { emailVerified: false },
     });
     await resetPassword(input);
     expect(logSpies.info).toHaveBeenCalledWith(

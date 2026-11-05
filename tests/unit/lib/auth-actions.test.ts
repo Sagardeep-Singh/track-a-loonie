@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-  signInMock,
+  signInEmailMock,
+  signInSocialMock,
   headersMock,
   redirectMock,
   createUserMock,
@@ -12,7 +13,8 @@ const {
   requestPasswordResetMock,
   resetPasswordMock,
 } = vi.hoisted(() => ({
-  signInMock: vi.fn(),
+  signInEmailMock: vi.fn(),
+  signInSocialMock: vi.fn(),
   headersMock: vi.fn(),
   redirectMock: vi.fn(),
   createUserMock: vi.fn(),
@@ -24,10 +26,8 @@ const {
   resetPasswordMock: vi.fn(),
 }));
 
-vi.mock('@/auth', () => ({ signIn: signInMock, signOut: vi.fn() }));
-vi.mock('next-auth', () => ({
-  AuthError: class AuthError extends Error {},
-  CredentialsSignin: class CredentialsSignin extends Error {},
+vi.mock('@/lib/auth/auth', () => ({
+  auth: { api: { signInEmail: signInEmailMock, signInSocial: signInSocialMock, signOut: vi.fn() } },
 }));
 vi.mock('next/headers', () => ({ headers: headersMock }));
 vi.mock('next/navigation', () => ({ redirect: redirectMock }));
@@ -48,8 +48,15 @@ vi.mock('@/lib/services/rateLimit', async () => {
   return { ...actual, checkRateLimit: checkRateLimitMock };
 });
 
-const { signUpAction, requestPasswordResetAction, resetPasswordAction } =
-  await import('@/lib/auth/actions');
+const {
+  signInAction,
+  signInWithGoogleAction,
+  reauthenticateWithGoogleAction,
+  signUpAction,
+  requestPasswordResetAction,
+  resetPasswordAction,
+} = await import('@/lib/auth/actions');
+const { APIError } = await import('better-auth/api');
 const { RateLimitedError } = await import('@/lib/services/rateLimit');
 const { ServiceValidationError } = await import('@/lib/services/common');
 
@@ -92,6 +99,96 @@ const submitTo = async (action: FormAction, fields: Record<string, string>): Pro
 
 const submit = (fields: Record<string, string>): Promise<string> => submitTo(signUpAction, fields);
 
+const redirectTarget = async (action: () => Promise<void>): Promise<string> => {
+  try {
+    await action();
+    throw new Error('expected a redirect');
+  } catch (error) {
+    if (error instanceof RedirectSignal) return error.url;
+    throw error;
+  }
+};
+
+describe('signInAction', () => {
+  const fields = { email: ' A@Example.com ', password: 'password123456' };
+
+  it('rate limits by IP and normalized email before checking the password', async () => {
+    await submitTo(signInAction, fields);
+
+    expect(checkRateLimitMock).toHaveBeenCalledWith('login:ip', '1.2.3.4', 30, 15 * 60 * 1000);
+    expect(checkRateLimitMock).toHaveBeenCalledWith(
+      'login:email',
+      'a@example.com',
+      10,
+      15 * 60 * 1000,
+    );
+    const lastRateLimitCall = checkRateLimitMock.mock.invocationCallOrder[1];
+    expect(lastRateLimitCall).toBeLessThan(signInEmailMock.mock.invocationCallOrder[0]);
+  });
+
+  it('signs in with the normalized email and redirects to the dashboard', async () => {
+    await expect(submitTo(signInAction, fields)).resolves.toBe('/dashboard');
+
+    expect(signInEmailMock).toHaveBeenCalledWith({
+      body: { email: 'a@example.com', password: 'password123456' },
+      headers: expect.any(Headers),
+    });
+  });
+
+  it('returns the generic message when Better Auth rejects the credentials', async () => {
+    signInEmailMock.mockRejectedValue(
+      new APIError('UNAUTHORIZED', { message: 'Invalid email or password' }),
+    );
+
+    await expect(signInAction(undefined, formData(fields))).resolves.toBe(
+      'Incorrect email or password.',
+    );
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it('returns the rate-limit message without checking the password', async () => {
+    checkRateLimitMock.mockRejectedValue(new RateLimitedError(60_000));
+
+    await expect(signInAction(undefined, formData(fields))).resolves.toBe(
+      'Too many attempts. Try again in a few minutes.',
+    );
+    expect(signInEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('rethrows unexpected errors instead of hiding them behind the generic message', async () => {
+    signInEmailMock.mockRejectedValue(new Error('db down'));
+
+    await expect(signInAction(undefined, formData(fields))).rejects.toThrow('db down');
+  });
+});
+
+describe('Google sign-in actions', () => {
+  const googleUrl =
+    'https://accounts.google.com/o/oauth2/v2/auth?client_id=x&prompt=select_account';
+
+  it('redirects to the Google URL Better Auth returns, landing on the dashboard', async () => {
+    signInSocialMock.mockResolvedValue({ url: googleUrl, redirect: true });
+
+    await expect(redirectTarget(signInWithGoogleAction)).resolves.toBe(googleUrl);
+    expect(signInSocialMock).toHaveBeenCalledWith({
+      body: { provider: 'google', callbackURL: '/dashboard', errorCallbackURL: '/login' },
+      headers: expect.any(Headers),
+    });
+  });
+
+  it('forces prompt=login for the re-auth before account deletion', async () => {
+    signInSocialMock.mockResolvedValue({ url: googleUrl, redirect: true });
+
+    const target = new URL(await redirectTarget(reauthenticateWithGoogleAction));
+
+    expect(target.searchParams.get('prompt')).toBe('login');
+    expect(target.searchParams.get('client_id')).toBe('x');
+    expect(signInSocialMock).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ callbackURL: '/settings' }) }),
+    );
+  });
+});
+
 describe('signUpAction', () => {
   const validFields = { name: 'A User', email: 'a@example.com', password: 'password123456' };
 
@@ -123,7 +220,7 @@ describe('signUpAction', () => {
     expect(url).toBe('/login?signup=check-email');
     expect(issueAndSendVerificationEmailMock).toHaveBeenCalledWith('user-1', 'a@example.com');
     expect(sendAccountExistsEmailMock).not.toHaveBeenCalled();
-    expect(signInMock).not.toHaveBeenCalled();
+    expect(signInEmailMock).not.toHaveBeenCalled();
   });
 
   it('sends an account-exists notice for a taken email and gives the exact same response', async () => {
@@ -134,7 +231,7 @@ describe('signUpAction', () => {
     expect(url).toBe('/login?signup=check-email');
     expect(sendAccountExistsEmailMock).toHaveBeenCalledWith('a@example.com');
     expect(issueAndSendVerificationEmailMock).not.toHaveBeenCalled();
-    expect(signInMock).not.toHaveBeenCalled();
+    expect(signInEmailMock).not.toHaveBeenCalled();
   });
 
   it.each([true, false])(

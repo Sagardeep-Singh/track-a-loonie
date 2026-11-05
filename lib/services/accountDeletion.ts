@@ -2,10 +2,11 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
 import { GoogleReauthRequiredError, ServiceValidationError } from '@/lib/services/common';
 import { wipeUserData } from '@/lib/services/userData';
+import { getPasswordHash } from '@/lib/services/users';
 import type { DeleteAccountInput } from '@/lib/validators/account-deletion';
 
 /** How recently a Google-only user must have completed an interactive
- * `prompt=login` round-trip for their `reauthenticatedAt` JWT claim to count
+ * `prompt=login` round-trip (which starts a new session) for that session to count
  * as proof they still control the account — the passwordless equivalent of
  * `currentPassword` re-entry. Long enough to cover the OAuth redirect plus
  * reading the confirm copy and typing the confirm email; short enough that
@@ -17,10 +18,7 @@ export const deleteUserAccount = async (
   input: DeleteAccountInput,
   googleReauthenticatedAt: number | null,
 ): Promise<{ ok: true }> => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { email: true, passwordHash: true },
-  });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
   if (!user) {
     throw new ServiceValidationError('Your session is no longer valid. Sign in again.');
   }
@@ -29,11 +27,9 @@ export const deleteUserAccount = async (
     throw new ServiceValidationError('The email you typed does not match your account email.');
   }
 
-  if (user.passwordHash !== null) {
-    if (
-      !input.currentPassword ||
-      !(await bcrypt.compare(input.currentPassword, user.passwordHash))
-    ) {
+  const passwordHash = await getPasswordHash(userId);
+  if (passwordHash !== null) {
+    if (!input.currentPassword || !(await bcrypt.compare(input.currentPassword, passwordHash))) {
       throw new ServiceValidationError('Password is incorrect.');
     }
   } else {
