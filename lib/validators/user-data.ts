@@ -121,6 +121,8 @@ const categoryAssignmentSchema = z.strictObject({
 const budgetSettingsSchema = z.strictObject({
   mode: z.enum(['LIMITS', 'ZERO_BASED']),
   zbbStartMonth: budgetMonth.nullable(),
+  /** absent in files exported before the setting existed */
+  reimbursementsInExpenseMonth: z.boolean().optional(),
 });
 
 const savingsGoalSchema = z.strictObject({

@@ -490,7 +490,8 @@ test('8. totals card keeps bucket precedence and nets reimbursed spending', asyn
     bar.locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]');
   // the $40 payback is linked reimbursement income, so it is NOT credit
   await expect(stat('Credit')).toContainText('100.00');
-  // the $40 lunch is fully reimbursed, so it nets out of Debit (like Overview's Out)
+  // the $40 payback lands in the same view, so it comes off Debit (like
+  // Overview's Out in the month the money arrives)
   await expect(stat('Debit')).toContainText('0.00');
   await expect(stat('Net')).toContainText('100.00');
   const excluded = (label: string): Locator =>
@@ -498,7 +499,21 @@ test('8. totals card keeps bucket precedence and nets reimbursed spending', asyn
   // payment AND transfer (30) counts toward payments only
   await expect(excluded('Payments')).toHaveText('$230.00');
   await expect(excluded('Transfers')).toHaveText('$50.00');
-  await expect(excluded('Reimbursements')).toHaveText('$40.00');
+  // netted from Debit by default, so not listed as kept out of the totals
+  await expect(bar.getByText('Reimbursements')).toHaveCount(0);
+});
+
+test('8c. rows carry Reimbursement, Payment, Transfer and Reimbursable badges', async () => {
+  await visit([ids.chips]);
+  const badges = (payee: string): Locator =>
+    row(`${payee} ${stamp}`).getByTestId('transaction-badge');
+  await expect(badges('Chips Payback')).toHaveText(['Reimbursement']);
+  await expect(badges('Chips Payment')).toHaveText(['Payment']);
+  // a payment that's also a matched transfer reads as a payment only
+  await expect(badges('Chips Payment+Transfer')).toHaveText(['Payment']);
+  await expect(badges('Chips Transfer')).toHaveText(['Transfer']);
+  await expect(badges('Chips Work Lunch')).toHaveText(['Reimbursable · reimbursed']);
+  await expect(badges('Chips Salary')).toHaveCount(0);
 });
 
 test('8b. the pending reimbursements filter narrows server-side', async () => {

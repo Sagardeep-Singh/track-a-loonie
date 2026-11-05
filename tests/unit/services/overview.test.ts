@@ -10,11 +10,11 @@ const { prismaMock, spreadFindMany, goalFindMany } = vi.hoisted(() => ({
     transaction: { groupBy: vi.fn(), findMany: vi.fn() },
     account: { findFirst: vi.fn() },
     categoryRule: { findMany: vi.fn() },
-    reimbursementLink: { findMany: vi.fn() },
+    reimbursementLink: { findMany: vi.fn(), groupBy: vi.fn() },
   },
 }));
 
-// the manually-completed-reimbursement lookup in listReimbursedAmountsByExpenseDate
+// the manually-completed-reimbursement lookup in listReimbursedAmounts
 // also calls transaction.findMany; route it away so each test's own
 // transaction.findMany mocks (and their call order) stay about the ledger rows.
 // The spread-window lookup in listSpreadSharesInRange gets its own mock too.
@@ -48,6 +48,7 @@ const { getOverviewData } = await import('@/lib/services/overview');
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
+  prismaMock.reimbursementLink.groupBy.mockResolvedValue([]);
   spreadFindMany.mockResolvedValue([]);
   prismaMock.savingsGoal.findMany.mockResolvedValue([]);
   prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
@@ -383,7 +384,9 @@ describe('getOverviewData', () => {
       {
         amount: 40,
         expenseTransactionId: 'exp-1',
-        expense: { categoryId: 'cat-1', date: new Date(Date.UTC(2026, 2, 5)) },
+        createdAt: new Date(Date.UTC(2026, 2, 9)),
+        income: { date: new Date(Date.UTC(2026, 2, 9)) },
+        expense: { categoryId: 'cat-1', date: new Date(Date.UTC(2026, 2, 5)), amount: 100 },
       },
     ]);
     prismaMock.categoryRule.findMany.mockResolvedValue([]);
@@ -405,6 +408,59 @@ describe('getOverviewData', () => {
     // the ledger row itself still shows the full, gross amount — it happened,
     // it's just not counted as full out-of-pocket spend anymore
     expect(result.selectedDay.rows[0].amount).toBe('100.00');
+  });
+
+  it('nets a reimbursement for an earlier month out of the month and day its money arrived', async () => {
+    prismaMock.budget.findMany.mockResolvedValue([]);
+    prismaMock.transaction.groupBy.mockResolvedValue([]);
+    prismaMock.account.findFirst.mockResolvedValue(null);
+    prismaMock.transaction.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'exp-mar',
+          type: 'EXPENSE',
+          amount: 50,
+          date: new Date(Date.UTC(2026, 2, 5)),
+          isPayment: false,
+          isTransfer: false,
+          categoryId: 'cat-1',
+          category: { name: 'Work' },
+          reimbursementIncomeLinks: [],
+        },
+        {
+          id: 'exp-mar-2',
+          type: 'EXPENSE',
+          amount: 30,
+          date: new Date(Date.UTC(2026, 2, 12)),
+          isPayment: false,
+          isTransfer: false,
+          categoryId: 'cat-2',
+          category: { name: 'Food' },
+          reimbursementIncomeLinks: [],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    // a January expense of 100 paid back with 70 on March 12
+    prismaMock.reimbursementLink.findMany.mockResolvedValue([
+      {
+        amount: 70,
+        expenseTransactionId: 'exp-jan',
+        createdAt: new Date(Date.UTC(2026, 2, 12)),
+        income: { date: new Date(Date.UTC(2026, 2, 12)) },
+        expense: { categoryId: 'cat-1', date: new Date(Date.UTC(2026, 0, 10)), amount: 100 },
+      },
+    ]);
+    prismaMock.categoryRule.findMany.mockResolvedValue([]);
+
+    const result = await getOverviewData('user-1', { month: 202603, day: 5 });
+
+    // only 50 of Work spending this month to offset: clamped, never credit
+    expect(result.hero.expense).toBe('30.00');
+    expect(result.expenseBreakdown.map((s) => [s.categoryName, s.amount])).toEqual([
+      ['Food', '30.00'],
+    ]);
+    expect(result.dayBars.find((d) => d.day === 5)?.expense).toBe(50);
+    expect(result.dayBars.find((d) => d.day === 12)?.expense).toBe(0);
   });
 
   it('does not net reimbursements out of the credit card cycle balance/spend', async () => {
@@ -444,7 +500,9 @@ describe('getOverviewData', () => {
       {
         amount: 40,
         expenseTransactionId: 'exp-1',
-        expense: { categoryId: null, date: new Date() },
+        createdAt: new Date(),
+        income: { date: new Date() },
+        expense: { categoryId: null, date: new Date(), amount: 100 },
       },
     ]);
     prismaMock.categoryRule.findMany.mockResolvedValue([]);

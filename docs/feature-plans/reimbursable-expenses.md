@@ -41,6 +41,8 @@ amount actually reimbursed`, clamped at 0 (overshoot is allowed but never become
   credit). Attributed to the **expense's month** — a January expense reimbursed in March
   retroactively lowers January's spent. Accepted: past months can shift when a late
   reimbursement arrives.
+  **Superseded by `reimbursement-month-attribution.md`:** the default is now the month the
+  money arrives; expense-month attribution is a per-user opt-in.
   An expense manually marked fully reimbursed counts as reimbursed for its full expected amount
   (linked total topped up to expected), since that's what "fully reimbursed" asserts.
 - **The Overview page nets out reimbursements everywhere, not just budgets** — `hero.expense`,

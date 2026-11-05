@@ -114,7 +114,7 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
     }),
     prisma.userBudgetSettings.findUnique({
       where: { userId },
-      select: { mode: true, zbbStartMonth: true },
+      select: { mode: true, zbbStartMonth: true, reimbursementsInExpenseMonth: true },
     }),
     prisma.savingsGoal.findMany({
       where: { userId },
@@ -216,7 +216,11 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         amount: decimalToString(a.amount),
       })),
       budgetSettings: budgetSettings
-        ? { mode: budgetSettings.mode, zbbStartMonth: budgetSettings.zbbStartMonth }
+        ? {
+            mode: budgetSettings.mode,
+            zbbStartMonth: budgetSettings.zbbStartMonth,
+            reimbursementsInExpenseMonth: budgetSettings.reimbursementsInExpenseMonth,
+          }
         : null,
       savingsGoals: savingsGoals.map((g) => ({
         id: g.id,

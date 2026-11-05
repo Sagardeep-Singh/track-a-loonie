@@ -7,7 +7,6 @@ import { AnimatePresence, m } from 'framer-motion';
 import {
   ArrowLeftRight,
   CalendarRange,
-  HandCoins,
   Loader2,
   Plus,
   Search,
@@ -19,6 +18,7 @@ import { Drawer } from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Money } from '@/components/ui/money';
+import { TransactionBadges } from '@/components/transactions/transaction-badges';
 import { TransactionTotals } from '@/components/transactions/transaction-totals';
 import { TransactionForm } from '@/components/transactions/transaction-form';
 import { AddTransactionLink } from '@/components/transactions/add-transaction-link';
@@ -647,24 +647,7 @@ export const TransactionsView = ({
                                 <span className="truncate">{t.importBatchFilename}</span>
                               </div>
                             )}
-                            {t.isReimbursable && (
-                              <div className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]">
-                                <HandCoins size={11} />
-                                {t.reimbursementStatus === 'COMPLETE' ? (
-                                  <span>Reimbursable · reimbursed</span>
-                                ) : (
-                                  <span className="flex items-center gap-1">
-                                    Reimbursable ·{' '}
-                                    <Money
-                                      value={t.reimbursementOutstanding}
-                                      tone="neutral"
-                                      className="text-[11px]"
-                                    />{' '}
-                                    pending
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            <TransactionBadges transaction={t} className="mt-1" />
                             {t.spreadMonths !== null && t.spreadMonthlyAmount !== null && (
                               <div
                                 className="text-ink-muted mt-0.5 flex items-center gap-1 text-[11px]"
@@ -835,6 +818,7 @@ export const TransactionsView = ({
                                 className="shrink-0 text-[15.5px]"
                               />
                             </div>
+                            <TransactionBadges transaction={t} className="mt-1.5" />
                             <div className="mt-2.5 flex items-center justify-between gap-2.5">
                               <span className="text-ink-muted min-w-0 truncate text-xs">
                                 {t.accountName}
