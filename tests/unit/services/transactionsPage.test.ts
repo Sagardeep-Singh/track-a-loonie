@@ -431,6 +431,8 @@ describe('getTransactionsPage — Mode A', () => {
       debit: '0.30',
       payments: '0.00',
       transfers: '0.00',
+      paymentsIncome: '0.00',
+      transfersIncome: '0.00',
       reimbursementIncome: '0.00',
       net: '-0.20',
     });
@@ -456,6 +458,8 @@ describe('getTransactionsPage — Mode A', () => {
     expect(result.summary).toEqual({
       payments: '50.00', // payment AND transfer -> payments only
       transfers: '30.00',
+      paymentsIncome: '0.00',
+      transfersIncome: '0.00',
       reimbursementIncome: '45.00', // only the linked part of the income
       credit: '155.00', // 200 - 45 reimbursement share
       debit: '80.00',
@@ -795,6 +799,8 @@ describe('getTransactionsPage — Mode B', () => {
       debit: '1.00',
       payments: '100.00',
       transfers: '0.00',
+      paymentsIncome: '0.00',
+      transfersIncome: '0.00',
       reimbursementIncome: '1000.00',
       net: '9.00',
     });

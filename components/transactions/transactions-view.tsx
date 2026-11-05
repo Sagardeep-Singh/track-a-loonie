@@ -35,7 +35,11 @@ import {
   transactionFiltersToSearchParams,
   type TransactionFilters,
 } from '@/lib/transactions/transaction-filters';
-import type { TransactionSummary } from '@/lib/transactions/transaction-summary';
+import {
+  includeInTotals,
+  type TotalsInclusion,
+  type TransactionSummary,
+} from '@/lib/transactions/transaction-summary';
 import {
   transactionsPageSearchParams,
   transactionsPageUrl,
@@ -79,6 +83,8 @@ const toTotals = (
   net: Number(summary.net),
   payments: Number(summary.payments),
   transfers: Number(summary.transfers),
+  paymentsIncome: Number(summary.paymentsIncome),
+  transfersIncome: Number(summary.transfersIncome),
   reimbursementIncome: Number(summary.reimbursementIncome),
 });
 
@@ -138,6 +144,10 @@ export const TransactionsView = ({
   const [filtersDialogOpen, setFiltersDialogOpen] = useState(false);
   const [filtersDialogKey, setFiltersDialogKey] = useState(0);
   const [matchDialogOpen, setMatchDialogOpen] = useState(false);
+  const [inclusion, setInclusion] = useState<TotalsInclusion>({
+    payments: true,
+    transfers: true,
+  });
   const [matchDialogKey, setMatchDialogKey] = useState(0);
 
   // Loaded pages for `pagesKey`. Key = `<scope query>#<reloadNonce>`; mutations bump the nonce.
@@ -582,7 +592,11 @@ export const TransactionsView = ({
         aria-busy={pending}
         className={cn('mt-3.5 hidden transition-opacity lg:block', pending && 'opacity-60')}
       >
-        <TransactionTotals summary={toTotals(summary, desktopCount)} />
+        <TransactionTotals
+          summary={includeInTotals(toTotals(summary, desktopCount), inclusion)}
+          inclusion={inclusion}
+          onInclusionChange={setInclusion}
+        />
       </div>
 
       <div className="hidden lg:block">{renderScopeError()}</div>
@@ -783,7 +797,9 @@ export const TransactionsView = ({
         </div>
 
         <TransactionTotals
-          summary={toTotals(mobileSummary, totalCount)}
+          summary={includeInTotals(toTotals(mobileSummary, totalCount), inclusion)}
+          inclusion={inclusion}
+          onInclusionChange={setInclusion}
           className={cn('mt-3.5 transition-opacity', pending && 'opacity-60')}
         />
 
