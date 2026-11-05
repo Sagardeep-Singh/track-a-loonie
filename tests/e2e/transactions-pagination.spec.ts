@@ -204,13 +204,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     createTx({ accountId: ids.chips, date: '2026-01-20', ...data });
   await chip({ type: 'INCOME', amount: 100, payee: `Chips Salary ${stamp}` });
   await chip({ type: 'INCOME', amount: 200, payee: `Chips Payment ${stamp}`, isPayment: true });
-  await chip({
-    type: 'INCOME',
-    amount: 30,
-    payee: `Chips Payment+Transfer ${stamp}`,
-    isPayment: true,
-    isTransfer: true,
-  });
+  // a payment can't also be a transfer, so this is a second plain payment
+  await chip({ type: 'INCOME', amount: 30, payee: `Chips Payment 2 ${stamp}`, isPayment: true });
   await chip({ amount: 50, payee: `Chips Transfer ${stamp}`, isTransfer: true });
   const expense = await chip({
     amount: 40,
@@ -491,7 +486,7 @@ test('8. totals card keeps bucket precedence, counts reimbursements as credit an
   const stat = (label: string): Locator =>
     bar.locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]');
   const toggle = (label: string): Locator => bar.getByRole('button', { name: label });
-  // payment AND transfer (30) counts toward payments only
+  // both payments (200 + 30)
   await expect(toggle('Payments')).toContainText('$230.00');
   await expect(toggle('Transfers')).toContainText('$50.00');
   // by default the $40 payback is ordinary credit, so nothing is kept out
@@ -520,8 +515,7 @@ test('8c. rows carry Reimbursement, Payment, Transfer and Reimbursable badges', 
     row(`${payee} ${stamp}`).getByTestId('transaction-badge');
   await expect(badges('Chips Payback')).toHaveText(['Reimbursement']);
   await expect(badges('Chips Payment')).toHaveText(['Payment']);
-  // a payment that's also a matched transfer reads as a payment only
-  await expect(badges('Chips Payment+Transfer')).toHaveText(['Payment']);
+  await expect(badges('Chips Payment 2')).toHaveText(['Payment']);
   await expect(badges('Chips Transfer')).toHaveText(['Transfer']);
   await expect(badges('Chips Work Lunch')).toHaveText(['Reimbursable · reimbursed']);
   await expect(badges('Chips Salary')).toHaveCount(0);

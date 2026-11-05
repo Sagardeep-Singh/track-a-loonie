@@ -54,6 +54,7 @@ describe('matchTransfers', () => {
         where: {
           userId: 'user-1',
           isTransfer: false,
+          isPayment: false,
           isReimbursable: false,
           spreadMonths: null,
           reimbursementExpenseLinks: { none: {} },
@@ -143,6 +144,7 @@ describe('matchTransfers', () => {
         where: {
           userId: 'user-1',
           isTransfer: false,
+          isPayment: false,
           isReimbursable: false,
           spreadMonths: null,
           reimbursementExpenseLinks: { none: {} },

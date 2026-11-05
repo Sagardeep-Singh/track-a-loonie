@@ -294,6 +294,9 @@ export const updateTransaction = async (
     }
   }
 
+  if (resultingIsTransfer && resultingIsPayment) {
+    throw new ServiceValidationError('A card payment cannot also be a transfer');
+  }
   if (resultingIsReimbursable && (resultingIsTransfer || resultingIsPayment)) {
     throw new ServiceValidationError(
       'A reimbursable expense cannot also be a transfer or a card payment',

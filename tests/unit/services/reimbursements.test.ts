@@ -23,6 +23,7 @@ const {
   deriveReimbursementStatus,
   toCents,
   getExpenseReimbursement,
+  listReimbursedExpenses,
   createReimbursementLink,
   updateReimbursementLink,
   deleteReimbursementLink,
@@ -457,6 +458,63 @@ describe('deleteReimbursementLink', () => {
       ServiceValidationError,
     );
     expect(prismaMock.reimbursementLink.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe('listReimbursedExpenses', () => {
+  it('throws for a missing or unowned income', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue(null);
+
+    await expect(listReimbursedExpenses('user-1', 'inc-x')).rejects.toThrow(ServiceValidationError);
+    expect(prismaMock.reimbursementLink.findMany).not.toHaveBeenCalled();
+  });
+
+  it('scopes links to the user and income, oldest expense first', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ id: 'inc-1' });
+    prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
+
+    expect(await listReimbursedExpenses('user-1', 'inc-1')).toEqual([]);
+    expect(prismaMock.transaction.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'inc-1', userId: 'user-1' } }),
+    );
+    expect(prismaMock.reimbursementLink.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: 'user-1', incomeTransactionId: 'inc-1' },
+        orderBy: [{ expense: { date: 'asc' } }, { createdAt: 'asc' }],
+      }),
+    );
+  });
+
+  it('maps each link to the expense it reimburses, with money as 2dp strings', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ id: 'inc-1' });
+    prismaMock.reimbursementLink.findMany.mockResolvedValue([
+      {
+        id: 'link-1',
+        expenseTransactionId: 'exp-1',
+        incomeTransactionId: 'inc-1',
+        amount: 12.5,
+        createdAt: new Date('2026-02-01'),
+        expense: {
+          id: 'exp-1',
+          date: new Date('2026-01-15T00:00:00.000Z'),
+          amount: 40,
+          payee: 'Hotel',
+          account: { name: 'Visa' },
+        },
+      },
+    ]);
+
+    expect(await listReimbursedExpenses('user-1', 'inc-1')).toEqual([
+      {
+        linkId: 'link-1',
+        expenseTransactionId: 'exp-1',
+        amount: '12.50',
+        expenseDate: '2026-01-15T00:00:00.000Z',
+        expenseAmount: '40.00',
+        expensePayee: 'Hotel',
+        expenseAccountName: 'Visa',
+      },
+    ]);
   });
 });
 

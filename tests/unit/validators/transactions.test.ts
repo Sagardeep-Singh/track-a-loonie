@@ -38,6 +38,17 @@ describe('createTransactionSchema reimbursement rules', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects isPayment combined with isTransfer', () => {
+    const result = createTransactionSchema.safeParse({
+      ...base,
+      type: 'INCOME',
+      isPayment: true,
+      isTransfer: true,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].message).toBe('A card payment cannot also be a transfer');
+  });
+
   it('rejects isReimbursable combined with isPayment', () => {
     const result = createTransactionSchema.safeParse({
       ...base,
@@ -148,6 +159,11 @@ describe('updateTransactionSchema stays fully partial', () => {
   it('allows isPayment alone, since the isReimbursable conflict needs the DB row', () => {
     const result = updateTransactionSchema.safeParse({ isPayment: true });
     expect(result.success).toBe(true);
+  });
+
+  it('rejects isPayment + isTransfer together on a partial update', () => {
+    const result = updateTransactionSchema.safeParse({ isPayment: true, isTransfer: true });
+    expect(result.success).toBe(false);
   });
 });
 

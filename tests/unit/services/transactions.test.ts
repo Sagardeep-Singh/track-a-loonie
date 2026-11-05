@@ -271,6 +271,28 @@ describe('updateTransaction isPayment', () => {
 });
 
 describe('updateTransaction isTransfer', () => {
+  it('rejects marking a card payment as a transfer', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ ...baseExisting, isPayment: true });
+
+    await expect(updateTransaction('user-1', 'tx-1', { isTransfer: true })).rejects.toThrow(
+      'A card payment cannot also be a transfer',
+    );
+    expect(prismaMock.transaction.update).not.toHaveBeenCalled();
+  });
+
+  it('allows swapping a card payment for a transfer in one update', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ ...baseExisting, isPayment: true });
+    prismaMock.transaction.update.mockResolvedValue({ ...baseTx, isTransfer: true });
+
+    await updateTransaction('user-1', 'tx-1', { isTransfer: true, isPayment: false });
+
+    expect(prismaMock.transaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ isTransfer: true, isPayment: false }),
+      }),
+    );
+  });
+
   it('clears the correlation id when a transfer is un-marked', async () => {
     prismaMock.transaction.findFirst.mockResolvedValue({ ...baseExisting, isTransfer: true });
     prismaMock.transaction.update.mockResolvedValue({ ...baseTx, isTransfer: false });

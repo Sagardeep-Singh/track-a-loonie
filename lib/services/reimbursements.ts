@@ -35,6 +35,18 @@ export type FrontendExpenseReimbursement = {
   links: FrontendReimbursementLink[];
 };
 
+/** One expense an income transaction pays back, seen from the income side. */
+export type FrontendReimbursedExpense = {
+  linkId: string;
+  expenseTransactionId: string;
+  /** the part of this income allocated to the expense */
+  amount: string;
+  expenseDate: string;
+  expenseAmount: string;
+  expensePayee: string | null;
+  expenseAccountName: string;
+};
+
 export type ReimbursementCandidate = {
   transactionId: string;
   date: string;
@@ -163,6 +175,34 @@ export const getExpenseReimbursement = async (
     throw new ServiceValidationError('Transaction not found');
   }
   return toExpenseReimbursement(expense);
+};
+
+/** The expenses an income transaction reimburses, oldest expense first. */
+export const listReimbursedExpenses = async (
+  userId: string,
+  incomeTransactionId: string,
+): Promise<FrontendReimbursedExpense[]> => {
+  const income = await prisma.transaction.findFirst({
+    where: { id: incomeTransactionId, userId },
+    select: { id: true },
+  });
+  if (!income) {
+    throw new ServiceValidationError('Transaction not found');
+  }
+  const links = await prisma.reimbursementLink.findMany({
+    where: { userId, incomeTransactionId },
+    include: { expense: { include: { account: { select: { name: true } } } } },
+    orderBy: [{ expense: { date: 'asc' } }, { createdAt: 'asc' }],
+  });
+  return links.map((link) => ({
+    linkId: link.id,
+    expenseTransactionId: link.expenseTransactionId,
+    amount: fromCents(toCents(link.amount)),
+    expenseDate: link.expense.date.toISOString(),
+    expenseAmount: fromCents(toCents(link.expense.amount)),
+    expensePayee: link.expense.payee,
+    expenseAccountName: link.expense.account.name,
+  }));
 };
 
 const CANDIDATE_POOL_CAP = 200;

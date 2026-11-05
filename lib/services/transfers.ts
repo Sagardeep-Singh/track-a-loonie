@@ -51,10 +51,12 @@ export const matchTransfers = async (
     // invariant with no user action and no error (the caller swallows
     // failures from this function). A spread expense is excluded for the same
     // reason: it's real spending by definition, and flagging it a transfer
-    // would break the spread/transfer exclusion.
+    // would break the spread/transfer exclusion. A card payment is excluded
+    // because a payment can't also be a transfer.
     where: {
       userId,
       isTransfer: false,
+      isPayment: false,
       isReimbursable: false,
       spreadMonths: null,
       reimbursementExpenseLinks: { none: {} },
