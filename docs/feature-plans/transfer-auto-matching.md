@@ -41,12 +41,10 @@ and matching pairs should be detected automatically rather than hand-flagged.
   rows; a categorized transfer leg would otherwise inflate `hero.spent` and the budget rings while
   `hero.expense` excluded it — same dashboard, contradicting numbers. (`isPayment` needs no gate
   there: payments are INCOME and the sum is EXPENSE-only.)
-- **Un-marking is single-row and can orphan a partner.** `PATCH /api/transactions/:id` with
-  `isTransfer: false` clears the row's flag and its `transferMatchId`. The partner stays
-  flagged, so it remains excluded while its counterpart is not, and a re-run of
-  `matchTransfers` will not re-pair them (the flagged partner is filtered out of the candidate
-  set). Accepted for now: the fix is to un-mark the partner too. A "unlink the whole pair by
-  `transferMatchId`" operation is the obvious follow-up, deliberately not built yet.
+- **Un-marking unlinks the whole pair.** `PATCH /api/transactions/:id` with `isTransfer: false`
+  clears the row's flag and `transferMatchId`, and in the same database transaction clears both
+  on every other row sharing that `transferMatchId`. No leg is left half-excluded, and both can
+  be re-matched later. A hand-flagged transfer with no `transferMatchId` only un-marks itself.
 
 ## Scope found in this worktree (deviation from brief)
 
