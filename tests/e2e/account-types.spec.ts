@@ -65,3 +65,38 @@ test('the account type picker offers every new type', async ({ page }) => {
     await expect(type.locator('option', { hasText: label })).toHaveCount(1);
   }
 });
+
+test('an account with card payments cannot change to a non-credit type', async ({ page }) => {
+  await signUpThenSignIn(page, {
+    name: 'Account Types',
+    email: uniqueEmail(),
+    password: 'a-long-enough-password',
+  });
+  const account = await page.request.post('/api/accounts', {
+    data: { name: 'My Visa', type: 'CREDIT_CARD' },
+  });
+  expect(account.ok()).toBe(true);
+  const { id: accountId } = (await account.json()) as { id: string };
+  const payment = await page.request.post('/api/transactions', {
+    data: {
+      accountId,
+      type: 'INCOME',
+      amount: 120,
+      date: '2026-01-20',
+      payee: 'Card payment',
+      isPayment: true,
+    },
+  });
+  expect(payment.ok()).toBe(true);
+
+  await page.goto('/accounts');
+  const credit = page.getByRole('region', { name: 'Credit' });
+  await credit.getByRole('button', { name: 'Edit' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Type').selectOption({ label: 'Checking' });
+  await dialog.getByRole('button', { name: 'Save changes' }).click();
+
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'This account has 1 card payment. Un-mark it before changing to this account type.',
+  );
+});

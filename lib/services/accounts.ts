@@ -1,4 +1,4 @@
-import { defaultOnBudgetFor } from '@/lib/account-types';
+import { defaultOnBudgetFor, isLiabilityAccountType } from '@/lib/account-types';
 import { prisma } from '@/lib/db/prisma';
 import { toSerializable } from '@/lib/utils';
 import { ServiceValidationError } from '@/lib/services/common';
@@ -101,6 +101,18 @@ export const updateAccount = async (
   const nextType = input.type ?? existing.type;
   if (nextType !== 'CREDIT_CARD' && input.statementDay) {
     throw new ServiceValidationError('statementDay only applies to credit card accounts');
+  }
+  // card payments only make sense on a liability account; changing the type
+  // under them would leave rows the transaction service no longer accepts
+  if (input.type && !isLiabilityAccountType(input.type)) {
+    const payments = await prisma.transaction.count({
+      where: { userId, accountId, isPayment: true },
+    });
+    if (payments > 0) {
+      throw new ServiceValidationError(
+        `This account has ${payments} card payment${payments === 1 ? '' : 's'}. Un-mark ${payments === 1 ? 'it' : 'them'} before changing to this account type.`,
+      );
+    }
   }
 
   const account = await prisma.account.update({

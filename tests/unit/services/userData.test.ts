@@ -253,6 +253,43 @@ describe('importUserData', () => {
     });
   });
 
+  it('clears isPayment on rows that are not income on a liability account', async () => {
+    const file = structuredClone(baseFile) as unknown as {
+      data: { accounts: unknown[]; transactions: Record<string, unknown>[] };
+    };
+    file.data.accounts.push({
+      id: 'old-card',
+      name: 'Visa',
+      type: 'CREDIT_CARD',
+      startingBalance: '0.00',
+      statementDay: null,
+      createdAt: new Date('2026-01-01'),
+    });
+    const plain = { isTransfer: false, transferMatchId: null, isPayment: true };
+    // payment on a checking account (its type changed after it was flagged)
+    Object.assign(file.data.transactions[1], plain);
+    // valid card payment, plus a flagged expense on the same card
+    file.data.transactions.push(
+      { ...file.data.transactions[1], ...plain, id: 'old-tx-card-pay', accountId: 'old-card' },
+      {
+        ...file.data.transactions[0],
+        ...plain,
+        id: 'old-tx-card-expense',
+        accountId: 'old-card',
+      },
+    );
+
+    await importUserData('user-1', file as never);
+
+    const [txArg] = prismaMock.transaction.createMany.mock.calls[0];
+    expect(txArg.data.map((t: { isPayment: boolean }) => t.isPayment)).toEqual([
+      false,
+      false,
+      true,
+      false,
+    ]);
+  });
+
   it('imports a pre-spread export (no spread fields) as not spread', async () => {
     await importUserData('user-1', baseFile as never);
 

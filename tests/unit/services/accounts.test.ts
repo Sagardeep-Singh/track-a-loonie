@@ -9,6 +9,7 @@ const { prismaMock } = vi.hoisted(() => ({
       update: vi.fn(),
       delete: vi.fn(),
     },
+    transaction: { count: vi.fn() },
     reimbursementLink: { count: vi.fn() },
   },
 }));
@@ -23,6 +24,7 @@ const { ReimbursementConflictError, ServiceValidationError } =
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.count.mockResolvedValue(0);
+  prismaMock.transaction.count.mockResolvedValue(0);
 });
 
 describe('listAccounts', () => {
@@ -266,5 +268,59 @@ describe('updateAccount statementDay', () => {
       expect.objectContaining({ data: expect.objectContaining({ statementDay: 20 }) }),
     );
     expect(result.statementDay).toBe(20);
+  });
+});
+
+describe('updateAccount type change with card payments', () => {
+  const updatedRow = (type: string): Record<string, unknown> => ({
+    id: 'acc-1',
+    name: 'Visa',
+    type,
+    startingBalance: 0,
+    statementDay: null,
+    createdAt: new Date('2026-01-01'),
+    transactions: [],
+    importBatches: [],
+  });
+
+  it('blocks changing to a non-liability type while payments exist', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'CREDIT_CARD' });
+    prismaMock.transaction.count.mockResolvedValue(2);
+
+    await expect(updateAccount('user-1', 'acc-1', { type: 'CHECKING' })).rejects.toThrow(
+      'This account has 2 card payments. Un-mark them before changing to this account type.',
+    );
+    expect(prismaMock.transaction.count).toHaveBeenCalledWith({
+      where: { userId: 'user-1', accountId: 'acc-1', isPayment: true },
+    });
+    expect(prismaMock.account.update).not.toHaveBeenCalled();
+  });
+
+  it('allows the change once no payments remain', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'CREDIT_CARD' });
+    prismaMock.account.update.mockResolvedValue(updatedRow('CHECKING'));
+
+    await updateAccount('user-1', 'acc-1', { type: 'CHECKING' });
+
+    expect(prismaMock.account.update).toHaveBeenCalled();
+  });
+
+  it('allows switching between liability types without checking payments', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'CREDIT_CARD' });
+    prismaMock.account.update.mockResolvedValue(updatedRow('LINE_OF_CREDIT'));
+
+    await updateAccount('user-1', 'acc-1', { type: 'LINE_OF_CREDIT' });
+
+    expect(prismaMock.transaction.count).not.toHaveBeenCalled();
+    expect(prismaMock.account.update).toHaveBeenCalled();
+  });
+
+  it('skips the payment check on an edit that leaves the type alone', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'CREDIT_CARD' });
+    prismaMock.account.update.mockResolvedValue(updatedRow('CREDIT_CARD'));
+
+    await updateAccount('user-1', 'acc-1', { name: 'Visa' });
+
+    expect(prismaMock.transaction.count).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
-import { defaultOnBudgetFor } from '@/lib/account-types';
+import { defaultOnBudgetFor, isLiabilityAccountType } from '@/lib/account-types';
 import { prisma } from '@/lib/db/prisma';
 import { spreadEndMonth } from '@/lib/spread';
 import { USER_DATA_FORMAT_VERSION, type UserDataFile } from '@/lib/validators/user-data';
@@ -299,6 +299,7 @@ export const importUserData = async (
   const { data } = file;
 
   const accountIds = new Map(data.accounts.map((a) => [a.id, randomUUID()]));
+  const accountTypes = new Map(data.accounts.map((a) => [a.id, a.type]));
   const categoryIds = new Map(data.categories.map((c) => [c.id, randomUUID()]));
   const importBatchIds = new Map(data.importBatches.map((b) => [b.id, randomUUID()]));
   const transactionIds = new Map(data.transactions.map((t) => [t.id, randomUUID()]));
@@ -377,7 +378,12 @@ export const importUserData = async (
             note: t.note,
             importBatchId:
               t.importBatchId === null ? null : (importBatchIds.get(t.importBatchId) ?? null),
-            isPayment: t.isPayment,
+            // older backups can hold payments on an account whose type later
+            // changed; restore those as plain income rather than reject the file
+            isPayment:
+              t.isPayment &&
+              t.type === 'INCOME' &&
+              isLiabilityAccountType(accountTypes.get(t.accountId)),
             isTransfer: t.isTransfer,
             transferMatchId:
               t.transferMatchId === null ? null : (transferMatchIds.get(t.transferMatchId) ?? null),

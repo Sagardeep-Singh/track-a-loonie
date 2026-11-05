@@ -54,7 +54,7 @@ export const AccountForm = ({
 
     setPending(false);
     if (!res.ok) {
-      setError('Could not save this account. Check the fields and try again.');
+      setError(res.error ?? 'Could not save this account. Check the fields and try again.');
       return;
     }
 
