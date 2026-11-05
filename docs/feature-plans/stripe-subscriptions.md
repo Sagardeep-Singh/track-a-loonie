@@ -99,12 +99,13 @@ Assumptions (confirm before implementation):
 - [ ] Does the settings data import (`/api/settings/import`) respect the account limit, or
       is a restore always allowed? Suggest: refuse with a clear message when the file has
       more accounts than the plan allows, so a restore can't be used to skip the limit.
-- [ ] Is "2 accounts" counted across all account types, including off-budget and
-      investment accounts? Suggest: yes, every `Account` row counts.
-- [ ] Should "Visible history" also clamp the Categorize queue, or can Free users still
-      categorize old uncategorized imports? Suggest: clamp it, consistent with the rule.
-- [ ] Does the pricing page in the marketing site need a link-up (Upgrade button pointing
-      to `/settings/billing` or straight into Checkout)?
+- [x] Is "2 accounts" counted across all account types? **Yes**, every `Account` row counts,
+      including off-budget and investment accounts.
+- [x] Does "Visible history" clamp the Categorize queue? **Yes**, transactions before the
+      floor are hidden from the queue.
+- [x] Data export? **Always exports all transactions**, on every plan.
+- [x] Where does "Upgrade to Plus" go? **To an in-app page where the user enters payment
+      details and the subscription is created** (see Subscribe below).
 - [ ] Should the bootstrap admin user get a permanent unlimited override? Suggest: no, keep
       it a normal user.
 
@@ -204,13 +205,28 @@ its entitlements, so Free limits live in code and Git, not in Stripe.
 
 **Subscribe**
 
-1. Pricing page lists active plans and prices from `listPlans()`.
-2. `POST /api/billing/checkout { priceId }` → `createCheckoutSession(userId, priceId)`: gets
-   or creates the Stripe Customer (stored on `User.stripeCustomerId`, `metadata.userId`
-   set), creates a `subscription` mode Checkout Session with `client_reference_id = userId`,
-   returns its URL.
-3. Stripe redirects back to `/settings/billing?checkout=success`. The page does not trust the
-   redirect; it shows "Processing" until the webhook has written the subscription.
+1. "Upgrade to Plus" (marketing pricing page, billing settings, any `UpgradePrompt`) links
+   to `/upgrade?price=<stripePriceId>` in the app. The route is under `app/(protected)/`, so
+   a signed-out visitor goes through login or sign-up and comes back to it.
+2. The `/upgrade` page shows the plan summary (name, C$4/month, what's included) next to
+   **Stripe Embedded Checkout** (`ui_mode: 'embedded'`, `@stripe/stripe-js` +
+   `@stripe/react-stripe-js`). The user enters card details on our page; Stripe handles
+   the card form, 3-D Secure, Apple/Google Pay and SCA, so no card data touches our server
+   and PCI scope stays at SAQ A.
+3. On load the page calls `POST /api/billing/checkout { priceId }` →
+   `createCheckoutSession(userId, priceId)`: gets or creates the Stripe Customer (stored on
+   `User.stripeCustomerId`, `metadata.userId` set), refuses if the user already has an
+   active paid subscription (they get sent to the portal instead), and creates a
+   `subscription` mode Checkout Session with `client_reference_id = userId`,
+   `return_url = /upgrade/complete?session_id={CHECKOUT_SESSION_ID}`. Returns the
+   `client_secret` for the embedded form.
+4. Submitting the form creates the Stripe subscription. `/upgrade/complete` reads the
+   session through `getCheckoutResult(userId, sessionId)` (checks it belongs to the user)
+   and, if paid, upserts the `Subscription` row right away so the user sees Plus without
+   waiting on the webhook. The webhook does the same upsert, so whichever lands first wins
+   and the other is a no-op.
+5. If the session is still open or failed, the page sends the user back to `/upgrade` with
+   the error.
 
 **Manage**
 
@@ -284,6 +300,10 @@ key }` so the client can show an upgrade prompt.
   "Plus shows all your history" hint.
 - Account form hides or locks the statement day field on Free.
 - "Add account" shows the upgrade prompt once the user has 2.
+- `app/(protected)/upgrade/page.tsx` + `components/billing/embedded-checkout.tsx`: plan
+  summary and the embedded payment form, with loading, error and "already on Plus" states.
+- `app/(protected)/upgrade/complete/page.tsx`: success state ("You're on Plus") linking to
+  the dashboard, or the retry path.
 - `UpgradePrompt` shared component used wherever a 402 comes back (inline message with a
   link to billing), plus disabled states for gated nav items.
 - Billing section and links are hidden entirely when billing is disabled.
@@ -291,9 +311,11 @@ key }` so the client can show an upgrade prompt.
 ## Env vars
 
 Add to `.env.example`: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`,
 `NEXT_PUBLIC_APP_URL` (if not already derivable) for success and cancel URLs.
 
-New dependency: `stripe` (server SDK only, pin the API version in the client constructor).
+New dependencies: `stripe` (server SDK, pin the API version in the client constructor),
+`@stripe/stripe-js` and `@stripe/react-stripe-js` (embedded form on the client).
 
 ## Testing
 
@@ -311,6 +333,9 @@ Unit (`tests/unit/services/...`, Stripe client mocked):
   balances and ZBB carryover still include older rows, export includes everything.
 - `sendDueReminders` skips Free users and resumes after upgrade.
 - Account deletion cancels the Stripe subscription.
+- `createCheckoutSession`: reuses an existing customer, refuses an unknown or inactive price,
+  refuses when already subscribed. `getCheckoutResult`: rejects another user's session,
+  upsert is idempotent with the webhook.
 
 E2E (`tests/e2e/billing.spec.ts`), billing env set to Stripe test mode with Checkout stubbed
 or a seeded subscription row:
@@ -318,6 +343,8 @@ or a seeded subscription row:
 - Free user with 2 accounts sees the upgrade prompt on "Add account".
 - Free user sees Trends locked and can't pick a month older than 12 months.
 - Seeded paid user can create past the Free limit.
+- `/upgrade` renders the embedded form for a Free user, redirects a signed-out visitor to
+  login and back, and sends a Plus user to billing instead.
 - Billing page shows plan and status; hidden when billing is disabled.
 
 Manual: Stripe CLI `stripe listen --forward-to localhost:3000/api/stripe/webhook` with a test
@@ -333,7 +360,7 @@ card through the full subscribe, switch, cancel flow.
       `User.stripeCustomerId`), seed the Free plan
 - [ ] `lib/billing/entitlements.ts` types, Zod metadata parser, unlimited constant
 - [ ] `lib/services/billing.ts`: `listPlans`, `getBillingSummary`, `createCheckoutSession`,
-      `createPortalSession`, `handleStripeEvent`, `cancelSubscriptionForDeletion`
+      `getCheckoutResult`, `createPortalSession`, `handleStripeEvent`, `cancelSubscriptionForDeletion`
 - [ ] `lib/services/entitlements.ts`: `getEntitlements`, `assertCanCreate`, `assertFeature`,
       `getHistoryFloor`
 - [ ] `PlanLimitError` / `PlanFeatureError` in `lib/services/common.ts` and 402 mapping in
@@ -345,7 +372,9 @@ card through the full subscribe, switch, cancel flow.
 - [ ] Gate trends, reimbursements, statement cycles, push reminders (incl. cron filter)
 - [ ] Apply history floor to transactions, overview, budgets, ZBB, categorize, period picker
 - [ ] Hook subscription cancel into `accountDeletion.ts`
+- [ ] `/upgrade` page with Embedded Checkout and `/upgrade/complete`
 - [ ] Billing settings page, plan cards, `UpgradePrompt`, gated nav states
+- [ ] Point the marketing site's "Upgrade to Plus" button at `/upgrade`
 - [ ] Unit tests and e2e spec
 - [ ] README: Stripe setup steps (products, metadata keys, webhook endpoint, portal config)
 - [ ] `npm run format:fix && npm run lint`, `npm run test`, `npm run test:e2e`
