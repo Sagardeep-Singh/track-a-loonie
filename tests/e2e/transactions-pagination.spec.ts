@@ -131,8 +131,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       statementDay: 15,
     })
   ).id;
+  // a liability, so its card-payment fixtures pass the server's isPayment guard;
+  // not CREDIT_CARD, so the page shows no statement-period UI for it
   ids.chips = (
-    await post<{ id: string }>('/api/accounts', { name: names.chips, type: 'CHECKING' })
+    await post<{ id: string }>('/api/accounts', { name: names.chips, type: 'LINE_OF_CREDIT' })
   ).id;
   ids.category = (await post<{ id: string }>('/api/categories', { name: names.category })).id;
 
