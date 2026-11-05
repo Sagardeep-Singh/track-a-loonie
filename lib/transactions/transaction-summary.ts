@@ -30,18 +30,16 @@ type SummaryInput = Pick<
     >
   >;
 
-/** What's netted from a reimbursable expense's own row. In expense-month mode
- * that's everything paid back: the linked total, or the full expected amount
- * once the user manually marks it fully reimbursed. By default linked money
- * counts where it arrives instead, so only the manual top-up stays on the
- * expense. Mirrors listReimbursedAmounts so Debit matches Overview's Out. */
-const reimbursedAmount = (t: SummaryInput, inExpenseMonth: boolean): number => {
+/** What's been paid back on a reimbursable expense (netted only with the
+ * expense-month setting): the linked total, or the full expected amount once
+ * the user manually marks it fully reimbursed. Mirrors listReimbursedAmounts
+ * so Debit matches Overview's Out. */
+const reimbursedAmount = (t: SummaryInput): number => {
   if (!t.isReimbursable) return 0;
   const linked = Number(t.reimbursementLinkedTotal ?? 0);
-  const total = t.reimbursementCompletedManually
+  return t.reimbursementCompletedManually
     ? Math.max(linked, Number(t.reimbursementExpectedAmount ?? 0))
     : linked;
-  return inExpenseMonth ? total : total - linked;
 };
 
 /** The part of an income linked as reimbursement. Only that part is the
@@ -53,12 +51,12 @@ const reimbursementIncomeAmount = (t: SummaryInput, amount: number): number =>
 /** Payments toward a credit card's balance settle the *previous* statement,
  * and both legs of a transfer between the user's own accounts are money that
  * never left the ledger, so neither counts toward this period's
- * credit/debit/net; they're reported separately instead. Income linked as a
- * reimbursement only has its linked part moved out of credit. In
- * expense-month mode each expense counts net of what's been reimbursed,
- * clamped at 0, and the linked income is reported separately; by default
- * (`inExpenseMonth` false) the linked income in view comes off Debit instead,
- * like Overview does in the month the money arrives. */
+ * credit/debit/net; they're reported separately instead. By default
+ * (`inExpenseMonth` false) an expense counts in full in Debit and a
+ * reimbursement is ordinary Credit when it arrives. With the expense-month
+ * setting each expense counts net of what's been reimbursed, clamped at 0,
+ * and only the unlinked part of a reimbursement income is credit; the linked
+ * part is reported separately. */
 export const summarizeTransactions = (
   list: SummaryInput[],
   { inExpenseMonth = true }: { inExpenseMonth?: boolean } = {},
@@ -74,14 +72,14 @@ export const summarizeTransactions = (
       } else if (t.isTransfer) {
         acc.transfers += amount;
         if (t.type === 'INCOME') acc.transfersIncome += amount;
-      } else if (t.isReimbursementIncome) {
+      } else if (t.isReimbursementIncome && inExpenseMonth) {
         const reimbursed = reimbursementIncomeAmount(t, amount);
         acc.reimbursementIncome += reimbursed;
         acc.credit += amount - reimbursed;
       } else if (t.type === 'INCOME') {
         acc.credit += amount;
       } else {
-        acc.debit += Math.max(0, amount - reimbursedAmount(t, inExpenseMonth));
+        acc.debit += Math.max(0, amount - (inExpenseMonth ? reimbursedAmount(t) : 0));
       }
       return acc;
     },
@@ -95,10 +93,6 @@ export const summarizeTransactions = (
       reimbursementIncome: 0,
     },
   );
-  if (!inExpenseMonth) {
-    summary.debit = Math.max(0, summary.debit - summary.reimbursementIncome);
-    summary.reimbursementIncome = 0;
-  }
   return { ...summary, count: list.length, net: summary.credit - summary.debit };
 };
 

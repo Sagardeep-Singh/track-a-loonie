@@ -135,8 +135,8 @@ export const BudgetingSection = ({
           <div className="text-sm font-medium">Reimbursements</div>
           <div className="text-ink-muted mt-0.5 text-[12.5px]">
             {inExpenseMonth
-              ? 'Lower spending in the month of the expense they pay back. Past months can change.'
-              : 'Lower spending in the month the money arrives, so past months stay as they were.'}
+              ? 'Taken off the expense they pay back, in that month. Past months can change.'
+              : 'Count as income when the money arrives. Expenses stay in full in the month you spent.'}
           </div>
         </div>
         <PillGroup>

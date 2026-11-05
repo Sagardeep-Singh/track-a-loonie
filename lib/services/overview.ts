@@ -2,7 +2,10 @@ import { daysInMonth as daysInMonthOf, monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { listBudgets } from '@/lib/services/budgets';
 import { getCategorizeQueueStats } from '@/lib/services/categorize';
-import { listReimbursedAmounts } from '@/lib/services/reimbursements';
+import {
+  getReimbursementsInExpenseMonth,
+  listReimbursedAmounts,
+} from '@/lib/services/reimbursements';
 import { getGoalEffects } from '@/lib/services/savingsGoals';
 import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 import { getStatementPeriod } from '@/lib/statement';
@@ -127,6 +130,10 @@ export const getOverviewData = async (
   const now = new Date();
   const todayOfMonth = isCurrentMonth ? now.getUTCDate() : daysInMonth;
 
+  // By default a reimbursement is income in the month it arrives and the
+  // expense stays in full in its own month; with the expense-month setting
+  // it nets out of the expense instead and isn't income.
+  const inExpenseMonth = await getReimbursementsInExpenseMonth(userId);
   const [budgets, transactions, cardAccount, reimbursedExpenses, spreadShares, goalEffects] =
     await Promise.all([
       listBudgets(userId, month),
@@ -142,7 +149,7 @@ export const getOverviewData = async (
         where: { userId, type: 'CREDIT_CARD', statementDay: { not: null } },
         orderBy: { createdAt: 'asc' },
       }),
-      listReimbursedAmounts(userId, start, end),
+      listReimbursedAmounts(userId, start, end, inExpenseMonth),
       listSpreadSharesInRange(userId, month, month),
       getGoalEffects(userId, month),
     ]);
@@ -155,20 +162,12 @@ export const getOverviewData = async (
     t.type === 'EXPENSE' && !t.isTransfer && t.spreadMonths == null;
   const spreadTotal = spreadShares.reduce((sum, s) => sum + Number(s.amount), 0);
 
-  // Reimbursements that count this month net out of hero.expense/the pie/day
-  // bars/daySpent the same way budgets.ts does — otherwise hero.net would
-  // double-count the loss (income excluded, expense still gross). One for an
-  // expense dated this month nets that expense directly; one for an expense
-  // from another month (counted when its money arrived) comes off its
-  // category and the day it arrived instead, clamped at 0.
-  const monthExpenseIds = new Set(transactions.filter(isCountedExpense).map((t) => t.id));
+  // Reimbursed amount per expense (expense-month setting only), so
+  // hero.expense/the pie/day bars/daySpent net out reimbursements the same way
+  // budgets.ts does — otherwise hero.net would double-count the loss (income
+  // excluded, expense still gross).
   const reimbursedByTransaction = new Map<string, number>();
-  const otherMonthReimbursements: typeof reimbursedExpenses = [];
   for (const r of reimbursedExpenses) {
-    if (!monthExpenseIds.has(r.expenseTransactionId)) {
-      otherMonthReimbursements.push(r);
-      continue;
-    }
     reimbursedByTransaction.set(
       r.expenseTransactionId,
       (reimbursedByTransaction.get(r.expenseTransactionId) ?? 0) + Number(r.amount),
@@ -184,13 +183,17 @@ export const getOverviewData = async (
         Math.round((reimbursedByTransaction.get(t.id) ?? 0) * 100) -
         (goalEffects.coveredByTransaction.get(t.id) ?? 0),
     ) / 100;
-  // Only the part of an income linked as a reimbursement is excluded; any
-  // unlinked remainder is still ordinary income.
+  // With the expense-month setting only the part of an income linked as a
+  // reimbursement is excluded (it already lowered the expense); any unlinked
+  // remainder is still ordinary income. By default all of it is income.
   const netIncomeAmount = (t: (typeof transactions)[number]): number =>
-    Math.max(
-      0,
-      Number(t.amount) - t.reimbursementIncomeLinks.reduce((sum, l) => sum + Number(l.amount), 0),
-    );
+    inExpenseMonth
+      ? Math.max(
+          0,
+          Number(t.amount) -
+            t.reimbursementIncomeLinks.reduce((sum, l) => sum + Number(l.amount), 0),
+        )
+      : Number(t.amount);
 
   const limit = budgets.reduce((sum, b) => sum + Number(b.limitAmount), 0);
   const spent = budgets.reduce((sum, b) => sum + Number(b.spent), 0);
@@ -199,14 +202,14 @@ export const getOverviewData = async (
 
   // Both legs of a transfer between the user's own accounts are excluded from
   // every income/spending aggregate — the money never left the ledger. Balance
-  // math further down deliberately still counts them. Income linked as a
-  // reimbursement is excluded the same way (it's the user's own money coming
-  // back, not new income), but only up to the linked amount — it reads live
-  // links, not a static flag, so it starts/stops applying as links change.
+  // math further down deliberately still counts them. With the expense-month
+  // setting, income linked as a reimbursement is excluded the same way, but
+  // only up to the linked amount — it reads live links, not a static flag, so
+  // it starts/stops applying as links change.
   const income = transactions
     .filter((t) => t.type === 'INCOME' && !t.isPayment && !t.isTransfer)
     .reduce((sum, t) => sum + netIncomeAmount(t), 0);
-  const expenseBeforeOtherMonths =
+  const expense =
     transactions.filter(isCountedExpense).reduce((sum, t) => sum + netExpenseAmount(t), 0) +
     spreadTotal;
   const saved = (goalEffects.savedByMonth.get(month) ?? 0) / 100;
@@ -231,20 +234,7 @@ export const getOverviewData = async (
     if (amount > 0) addToCategory(t.categoryId, t.category?.name ?? null, amount);
   }
   for (const s of spreadShares) addToCategory(s.categoryId, s.categoryName, Number(s.amount));
-  // what each one actually took off, after clamping its category at 0
-  const otherMonthApplied = otherMonthReimbursements.map((r) => {
-    const entry = expenseTotalsByCategory.get(r.categoryId ?? 'uncategorized');
-    if (!entry) return 0;
-    const applied = Math.min(entry.amount, Number(r.amount));
-    entry.amount = Math.round((entry.amount - applied) * 100) / 100;
-    return applied;
-  });
-  const expense = Math.max(
-    0,
-    expenseBeforeOtherMonths - otherMonthApplied.reduce((sum, a) => sum + a, 0),
-  );
   const sortedExpenseSlices = [...expenseTotalsByCategory.entries()]
-    .filter(([, v]) => v.amount > 0)
     .map(([categoryId, v]) => ({
       categoryId: categoryId === 'uncategorized' ? null : categoryId,
       categoryName: v.name,
@@ -298,10 +288,6 @@ export const getOverviewData = async (
     if (t.type === 'INCOME' && !t.isPayment && !t.isTransfer) bucket.income += netIncomeAmount(t);
     if (isCountedExpense(t)) bucket.expense += netExpenseAmount(t);
   }
-  otherMonthReimbursements.forEach((r, i) => {
-    const bucket = dayMap.get(new Date(r.date).getUTCDate());
-    if (bucket) bucket.expense = Math.max(0, bucket.expense - otherMonthApplied[i]);
-  });
   const dayBars: OverviewDayBar[] = Array.from(dayMap.entries()).map(([day, v]) => ({
     day,
     income: v.income,
@@ -313,7 +299,9 @@ export const getOverviewData = async (
     Date.UTC(Math.floor(month / 100), (month % 100) - 1, selectedDayNum),
   );
   const dayTransactions = transactions.filter((t) => t.date.getUTCDate() === selectedDayNum);
-  const daySpent = dayMap.get(selectedDayNum)!.expense;
+  const daySpent = dayTransactions
+    .filter(isCountedExpense)
+    .reduce((sum, t) => sum + netExpenseAmount(t), 0);
   const dayFraction = dailyPace > 0 ? daySpent / dailyPace : 0;
   const dayOver = dailyPace > 0 && daySpent > dailyPace;
 

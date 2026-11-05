@@ -21,9 +21,9 @@ const Stat = ({
 
 /** Period totals for the transactions list. Credit/Debit/Net sit in their own
  * columns so they read at a glance. Card payments and transfers get toggles to
- * include/exclude them. Reimbursement income never counts as credit: by
- * default it comes off Debit, and with the expense-month setting it's listed
- * on its own, quieter line instead. */
+ * include/exclude them. Reimbursement income is ordinary credit by default;
+ * with the expense-month setting its linked part is kept out, on its own
+ * quieter line. */
 export const TransactionTotals = ({
   summary,
   inclusion,
