@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input, Select } from '@/components/ui/field';
+import { Select } from '@/components/ui/field';
+import { MoneyInput } from '@/components/ui/money-input';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { AnimatedMoney } from '@/components/ui/animated-money';
 import { BudgetRing } from '@/components/budgets/budget-ring';
@@ -271,13 +272,11 @@ export const BudgetsView = ({
                       {editingId === budget.id ? (
                         <div className="relative z-10 mt-2.5">
                           <div className="flex items-center gap-1.5">
-                            <Input
+                            <MoneyInput
                               className="rounded-[9px] font-mono"
-                              type="number"
-                              step="0.01"
                               autoFocus
                               value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
+                              onValueChange={setEditValue}
                             />
                             <button
                               type="button"
@@ -363,13 +362,11 @@ export const BudgetsView = ({
                     <label className="text-ink-muted mb-1.5 block text-[11px] font-semibold tracking-[0.06em] uppercase">
                       Monthly limit
                     </label>
-                    <Input
+                    <MoneyInput
                       className="bg-paper-raised rounded-[9px] font-mono"
-                      type="number"
-                      step="0.01"
                       placeholder="0.00"
                       value={limitAmount}
-                      onChange={(e) => setLimitAmount(e.target.value)}
+                      onValueChange={setLimitAmount}
                       required
                       autoFocus
                     />

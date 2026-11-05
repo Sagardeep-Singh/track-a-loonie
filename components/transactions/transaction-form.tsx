@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
+import { MoneyInput } from '@/components/ui/money-input';
 import { ReimbursementPanel } from '@/components/transactions/reimbursement-panel';
 import { useTransactionForm } from '@/lib/transactions/use-transaction-form';
 import { spreadPreview } from '@/lib/transactions/spread-preview';
@@ -117,15 +118,12 @@ export const TransactionForm = ({
     <form ref={formRef} onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="border-line flex items-baseline gap-2 border-b pb-3.5">
         <span className="text-ink-muted font-mono text-[26px]">$</span>
-        <Input
+        <MoneyInput
           id="amount"
           name="amount"
-          type="number"
-          step="0.01"
-          min="0.01"
           placeholder="0.00"
           defaultValue={transaction?.amount}
-          onChange={(e) => setAmountValue(e.target.value)}
+          onValueChange={setAmountValue}
           required
           className="placeholder:text-ink-muted/50 border-0 bg-transparent p-0 font-mono text-[30px] tracking-[-0.03em] tabular-nums shadow-none outline-none focus:border-0"
         />
@@ -230,15 +228,11 @@ export const TransactionForm = ({
           {isReimbursable && (
             <div className="mt-2 pl-6">
               <Label htmlFor="reimbursementExpectedAmount">Expected reimbursement</Label>
-              <Input
+              <MoneyInput
                 id="reimbursementExpectedAmount"
                 name="reimbursementExpectedAmount"
-                type="number"
-                step="0.01"
-                min="0.01"
-                max={amountValue || undefined}
                 value={reimbursementExpectedAmount}
-                onChange={(e) => setReimbursementExpectedAmount(e.target.value)}
+                onValueChange={setReimbursementExpectedAmount}
                 required
               />
               {expectedAmountError && (

@@ -135,3 +135,77 @@ test('the period selector, quick filters and dialog share one URL state', async 
   // Applying dialog filters keeps the custom range.
   await expect(page).toHaveURL(new RegExp(`from=${now.getUTCFullYear()}-01-03`));
 });
+
+test('the account and category pickers search, toggle, show chips, and keep Escape inside the panel', async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto('/transactions');
+
+  await page.getByRole('button', { name: /^Filters/ }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+
+  const categoriesTrigger = dialog.locator('#filter-categories');
+  const accountsTrigger = dialog.locator('#filter-accounts');
+  const categorySearch = dialog.getByRole('combobox', { name: 'Search categories' });
+  const accountSearch = dialog.getByRole('combobox', { name: 'Search accounts' });
+
+  // No long checkbox list until a picker is opened.
+  await expect(dialog.getByRole('option')).toHaveCount(0);
+  await expect(categoriesTrigger).toHaveText('All categories');
+
+  // Only one picker is open at a time.
+  await accountsTrigger.click();
+  await expect(accountSearch).toBeFocused();
+  await categoriesTrigger.click();
+  await expect(accountSearch).toBeHidden();
+  await expect(categorySearch).toBeFocused();
+
+  // Typing narrows the list; Enter toggles the highlighted option.
+  await categorySearch.fill('groc');
+  await expect(dialog.getByRole('option')).toHaveCount(1);
+  await categorySearch.press('Enter');
+  await expect(dialog.getByRole('option', { name: 'Groceries' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+
+  await categorySearch.fill('zzz-no-such-category');
+  await expect(dialog.getByText('No matches')).toBeVisible();
+
+  // Escape closes the panel only, not the whole dialog.
+  await categorySearch.press('Escape');
+  await expect(categorySearch).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(categoriesTrigger).toHaveText('Groceries');
+  await expect(categoriesTrigger).toBeFocused();
+
+  // Reopening lists the selection first; a second pick switches to chips.
+  await categoriesTrigger.click();
+  await expect(dialog.getByRole('option').first()).toHaveText('Groceries');
+  await dialog.getByRole('option', { name: 'Rent' }).click();
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(categoriesTrigger).toHaveText('2 selected');
+  await expect(dialog.getByRole('button', { name: 'Remove Rent' })).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Apply' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(/categoryIds=[^&]+%2C/);
+  await expect(page.getByRole('button', { name: /^Filters/ }).locator('span')).toHaveText('1');
+
+  // Removing a chip edits the draft; Apply writes it back to the URL.
+  await page.getByRole('button', { name: /^Filters/ }).click();
+  await dialog.getByRole('button', { name: 'Remove Rent' }).click();
+  await expect(categoriesTrigger).toHaveText('Groceries');
+  await dialog.getByRole('button', { name: 'Apply' }).click();
+  await expect(page).toHaveURL(/categoryIds=[^&%]+(&|$)/);
+
+  // Clear empties the picker.
+  await page.getByRole('button', { name: /^Filters/ }).click();
+  await categoriesTrigger.click();
+  await dialog.getByRole('button', { name: 'Clear' }).click();
+  await expect(categoriesTrigger).toHaveText('All categories');
+  await dialog.getByRole('button', { name: 'Apply' }).click();
+  await expect(page).not.toHaveURL(/categoryIds=/);
+});

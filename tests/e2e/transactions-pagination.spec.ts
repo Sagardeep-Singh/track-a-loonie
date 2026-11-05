@@ -95,6 +95,16 @@ const pickRange = async (from: string, to: string): Promise<void> => {
 };
 
 /** Opens the Filters dialog, lets `edit` change it, applies, and waits for the refetch. */
+/** Opens an account/category picker in the Filters dialog and toggles one option. */
+const togglePickerOption = async (
+  dialog: Locator,
+  trigger: string,
+  name: string,
+): Promise<void> => {
+  await dialog.locator(trigger).click();
+  await dialog.getByRole('option', { name, exact: true }).click();
+};
+
 const applyFilters = async (edit: (dialog: Locator) => Promise<void>): Promise<void> => {
   await page.getByRole('button', { name: /^Filters/ }).click();
   const dialog = page.getByRole('dialog');
@@ -394,17 +404,17 @@ test('4. every filter type narrows server-side, then widens again', async () => 
   await expect(salary).toBeHidden();
 
   // accountIds: widen to a second account, then narrow back
-  await applyFilters((d) => d.getByLabel(names.chips).check());
+  await applyFilters((d) => togglePickerOption(d, '#filter-accounts', names.chips));
   await expect(salary).toBeVisible();
   await expect(coffee).toBeVisible();
-  await applyFilters((d) => d.getByLabel(names.chips).uncheck());
+  await applyFilters((d) => togglePickerOption(d, '#filter-accounts', names.chips));
   await expect(salary).toBeHidden();
 
   // categoryIds
-  await applyFilters((d) => d.getByLabel(names.category).check());
+  await applyFilters((d) => togglePickerOption(d, '#filter-categories', names.category));
   await expect(coffee).toBeVisible();
   await expect(groceries).toBeHidden();
-  await applyFilters((d) => d.getByLabel(names.category).uncheck());
+  await applyFilters((d) => togglePickerOption(d, '#filter-categories', names.category));
   await expect(groceries).toBeVisible();
 
   // from / to (inclusive single day) — the period selector's params, now outside the dialog
@@ -472,23 +482,33 @@ test('6. By statement places rows on each side of the close date correctly', asy
   await expect(inCurrent).toBeHidden();
 });
 
-test('8. totals card keeps bucket precedence and nets reimbursed spending', async () => {
+test('8. totals card keeps bucket precedence, nets reimbursed spending and toggles payments/transfers', async () => {
   await visit([ids.chips]);
   const bar = summary();
   await expect(bar).toContainText('6 transactions');
   const stat = (label: string): Locator =>
     bar.locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]');
+  const toggle = (label: string): Locator => bar.getByRole('button', { name: label });
+  // payment AND transfer (30) counts toward payments only
+  await expect(toggle('Payments')).toContainText('$230.00');
+  await expect(toggle('Transfers')).toContainText('$50.00');
+  await expect(bar.getByText('Not in totals: Reimbursements')).toContainText('$40.00');
+
+  // included by default: $230 of payment income in Credit, the $50 transfer out in Debit
+  await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle('Transfers')).toHaveAttribute('aria-pressed', 'true');
+  await expect(stat('Credit')).toContainText('330.00');
+  await expect(stat('Debit')).toContainText('50.00');
+  await expect(stat('Net')).toContainText('280.00');
+
+  await toggle('Payments').click();
+  await toggle('Transfers').click();
+  await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'false');
   // the $40 payback is linked reimbursement income, so it is NOT credit
   await expect(stat('Credit')).toContainText('100.00');
   // the $40 lunch is fully reimbursed, so it nets out of Debit (like Overview's Out)
   await expect(stat('Debit')).toContainText('0.00');
   await expect(stat('Net')).toContainText('100.00');
-  const excluded = (label: string): Locator =>
-    bar.locator('span').filter({ hasText: label }).locator('span.font-money');
-  // payment AND transfer (30) counts toward payments only
-  await expect(excluded('Payments')).toHaveText('$230.00');
-  await expect(excluded('Transfers')).toHaveText('$50.00');
-  await expect(excluded('Reimbursements')).toHaveText('$40.00');
 });
 
 test('8b. the pending reimbursements filter narrows server-side', async () => {

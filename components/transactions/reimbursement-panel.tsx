@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, CheckCircle2, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/field';
+import { MoneyInput } from '@/components/ui/money-input';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Money } from '@/components/ui/money';
 import { ReimbursementLinkPicker } from '@/components/transactions/reimbursement-link-picker';
@@ -316,13 +316,10 @@ export const ReimbursementPanel = ({
                 </div>
                 {editingLinkId === link.id ? (
                   <div className="flex shrink-0 items-center gap-1.5">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
+                    <MoneyInput
                       aria-label="Amount for this link"
                       value={editAmountValue}
-                      onChange={(e) => setEditAmountValue(e.target.value)}
+                      onValueChange={setEditAmountValue}
                       className="w-24"
                     />
                     <button

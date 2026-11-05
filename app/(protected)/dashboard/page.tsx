@@ -5,6 +5,7 @@ import { getOverviewData, type OverviewDayBar } from '@/lib/services/overview';
 import { ScreenHeader } from '@/components/nav/screen-header';
 import { AnimatedMoney } from '@/components/ui/animated-money';
 import { Ring } from '@/components/ui/ring';
+import { BudgetModeCookieSync } from '@/components/budgets/budget-mode-cookie-sync';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { ExpensePie } from '@/components/dashboard/expense-pie';
 import { DayPanel } from '@/components/dashboard/day-panel';
@@ -21,6 +22,7 @@ import { getStoredPeriod } from '@/lib/period-cookie';
 import { getBudgetSettings, getZbbOverview } from '@/lib/services/zeroBased';
 import {
   ZbbAllocationCard,
+  ZbbCategoryRingsCard,
   ZbbHealthCard,
   ZbbHeroCard,
   ZbbSuggestionsCard,
@@ -64,8 +66,9 @@ const DashboardPage = async ({
     }),
     getBudgetSettings(userId),
   ]);
-  // zero-based mode swaps the limits hero and budget rings for its own cards;
-  // months before zero-based started fall back to the limits layout
+  // zero-based mode swaps the limits hero and budget rings for its own cards
+  // (category rings on desktop); months before zero-based started fall back
+  // to the limits layout
   const zbb =
     budgetSettings.mode === 'ZERO_BASED' &&
     budgetSettings.zbbStartMonth !== null &&
@@ -154,11 +157,90 @@ const DashboardPage = async ({
     </div>
   );
 
+  const ringsCard = (
+    <div className="border-line bg-paper-raised rounded-[18px] border p-5.5">
+      <div className="mb-4.5 flex items-baseline justify-between">
+        <h2 className="font-display text-base font-semibold">Budgets</h2>
+        <span className="text-ink-muted text-xs">share of each limit used</span>
+      </div>
+      {budgetRings.length === 0 ? (
+        <p className="text-ink-muted text-sm">
+          No budgets set for this month yet.{' '}
+          <Link href="/budgets" className="text-iris font-medium">
+            Set one
+          </Link>
+          .
+        </p>
+      ) : (
+        <div className="grid grid-cols-4 gap-2.5">
+          {budgetRings.map((r, index) => (
+            <Link
+              key={r.id}
+              style={{ '--i': index } as React.CSSProperties}
+              href={overviewCategoryHref(data.month, [r.categoryId])}
+              className="stagger-item hover:bg-paper flex flex-col items-center gap-2.5 rounded-xl py-1.5"
+            >
+              <Ring size="category" fraction={r.fraction}>
+                <span className="font-mono text-sm">{r.pctLabel}</span>
+              </Ring>
+              <div className="text-center text-[12.5px] leading-tight">
+                {r.categoryName}
+                <br />
+                <span className={cn('font-mono text-xs', r.over ? 'text-rose' : 'text-ink-muted')}>
+                  {money(r.left.replace('Over by ', ''))}
+                  {r.over && ' over'}
+                </span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const ringBars = budgetRings.length > 0 && (
+    <div className="border-line bg-paper-raised rounded-[18px] border p-4">
+      <div className="mb-3.5 flex items-baseline justify-between gap-2.5">
+        <span className="font-display text-base font-semibold">Budgets</span>
+        <Link href="/budgets" className="text-iris text-[11.5px] font-medium">
+          See all
+        </Link>
+      </div>
+      <div className="flex flex-col gap-3.5">
+        {budgetRings.map((r) => {
+          const alert = r.fraction > 0.85;
+          return (
+            <Link
+              key={r.id}
+              href={overviewCategoryHref(data.month, [r.categoryId])}
+              className="block"
+            >
+              <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                <span className="font-medium">{r.categoryName}</span>
+                <span className={cn('font-mono', alert ? 'text-rose' : 'text-iris')}>
+                  {money(r.left.replace('Over by ', ''))}
+                  {r.over ? ' over' : ' left'}
+                </span>
+              </div>
+              <div className="bg-paper-sunk mt-1.5 flex h-1.5 overflow-hidden rounded-full">
+                <span
+                  className={cn('block', alert ? 'bg-rose' : 'bg-iris')}
+                  style={{ width: `${Math.round(Math.min(r.fraction, 1) * 100)}%` }}
+                />
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   const isEmpty =
     !zbb &&
     budgetRings.length === 0 &&
     Number(hero.income) === 0 &&
     Number(hero.expense) === 0 &&
+    Number(hero.saved) === 0 &&
     !cycleCard;
 
   // With ?day= present, below lg the Day panel *is* the screen (per the plan's
@@ -169,6 +251,7 @@ const DashboardPage = async ({
 
   return (
     <div className="animate-[fade-up_0.3s_ease-out] pb-20 lg:pb-0">
+      <BudgetModeCookieSync mode={budgetSettings.mode} />
       <div className={dayFocus ? 'hidden lg:block' : undefined}>
         <ScreenHeader
           title="Overview"
@@ -229,8 +312,8 @@ const DashboardPage = async ({
               {zbb ? (
                 <>
                   <ZbbHeroCard data={zbb} />
+                  <ZbbCategoryRingsCard data={zbb} monthShortLabel={zbbMonthShort} />
                   <ZbbSuggestionsCard data={zbb} />
-                  <ZbbHealthCard data={zbb} monthShortLabel={zbbMonthShort} />
                 </>
               ) : (
                 <>
@@ -278,6 +361,16 @@ const DashboardPage = async ({
                               {money(hero.expense)}
                             </div>
                           </Link>
+                          {Number(hero.saved) !== 0 && (
+                            <Link href="/budgets" className="group">
+                              <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
+                                Saved
+                              </div>
+                              <div className="text-iris mt-1.5 font-mono text-lg tabular-nums group-hover:underline">
+                                {money(hero.saved)}
+                              </div>
+                            </Link>
+                          )}
                           <Link href={overviewNetHref(data.month)} className="group">
                             <div className="text-ink-muted text-[10.5px] font-semibold tracking-[0.08em] uppercase">
                               Net
@@ -303,49 +396,7 @@ const DashboardPage = async ({
                     </div>
                   </div>
 
-                  <div className="border-line bg-paper-raised rounded-[18px] border p-5.5">
-                    <div className="mb-4.5 flex items-baseline justify-between">
-                      <h2 className="font-display text-base font-semibold">Budgets</h2>
-                      <span className="text-ink-muted text-xs">share of each limit used</span>
-                    </div>
-                    {budgetRings.length === 0 ? (
-                      <p className="text-ink-muted text-sm">
-                        No budgets set for this month yet.{' '}
-                        <Link href="/budgets" className="text-iris font-medium">
-                          Set one
-                        </Link>
-                        .
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-4 gap-2.5">
-                        {budgetRings.map((r, index) => (
-                          <Link
-                            key={r.id}
-                            style={{ '--i': index } as React.CSSProperties}
-                            href={overviewCategoryHref(data.month, [r.categoryId])}
-                            className="stagger-item hover:bg-paper flex flex-col items-center gap-2.5 rounded-xl py-1.5"
-                          >
-                            <Ring size="category" fraction={r.fraction}>
-                              <span className="font-mono text-sm">{r.pctLabel}</span>
-                            </Ring>
-                            <div className="text-center text-[12.5px] leading-tight">
-                              {r.categoryName}
-                              <br />
-                              <span
-                                className={cn(
-                                  'font-mono text-xs',
-                                  r.over ? 'text-rose' : 'text-ink-muted',
-                                )}
-                              >
-                                {money(r.left.replace('Over by ', ''))}
-                                {r.over && ' over'}
-                              </span>
-                            </div>
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {ringsCard}
                 </>
               )}
 
@@ -536,6 +587,12 @@ const DashboardPage = async ({
                   </div>
                 </Link>
               </div>
+              {Number(hero.saved) !== 0 && (
+                <Link href="/budgets" className="mt-3 flex items-baseline justify-between gap-2.5">
+                  <span className="text-ink-muted text-[13px]">Saved toward goals</span>
+                  <span className="text-iris font-mono text-[15px]">{money(hero.saved)}</span>
+                </Link>
+              )}
               <div className="bg-line my-3.5 h-px" />
               <Link
                 href={overviewNetHref(data.month)}
@@ -546,6 +603,8 @@ const DashboardPage = async ({
               </Link>
               <p className="text-ink-muted mt-2.5 text-[11.5px] leading-relaxed">
                 Excludes transfers between your own accounts.
+                {Number(hero.saved) !== 0 &&
+                  ' Money saved toward goals is taken out of net, and spending it later isn’t counted again.'}
               </p>
             </div>
 
@@ -555,42 +614,7 @@ const DashboardPage = async ({
                 <ZbbHealthCard data={zbb} monthShortLabel={zbbMonthShort} />
               </>
             ) : (
-              budgetRings.length > 0 && (
-                <div className="border-line bg-paper-raised rounded-[18px] border p-4">
-                  <div className="mb-3.5 flex items-baseline justify-between gap-2.5">
-                    <span className="font-display text-base font-semibold">Budgets</span>
-                    <Link href="/budgets" className="text-iris text-[11.5px] font-medium">
-                      See all
-                    </Link>
-                  </div>
-                  <div className="flex flex-col gap-3.5">
-                    {budgetRings.map((r) => {
-                      const alert = r.fraction > 0.85;
-                      return (
-                        <Link
-                          key={r.id}
-                          href={overviewCategoryHref(data.month, [r.categoryId])}
-                          className="block"
-                        >
-                          <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                            <span className="font-medium">{r.categoryName}</span>
-                            <span className={cn('font-mono', alert ? 'text-rose' : 'text-iris')}>
-                              {money(r.left.replace('Over by ', ''))}
-                              {r.over ? ' over' : ' left'}
-                            </span>
-                          </div>
-                          <div className="bg-paper-sunk mt-1.5 flex h-1.5 overflow-hidden rounded-full">
-                            <span
-                              className={cn('block', alert ? 'bg-rose' : 'bg-iris')}
-                              style={{ width: `${Math.round(Math.min(r.fraction, 1) * 100)}%` }}
-                            />
-                          </div>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </div>
-              )
+              ringBars
             )}
           </div>
         )}

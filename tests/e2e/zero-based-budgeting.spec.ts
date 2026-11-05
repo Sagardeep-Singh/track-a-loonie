@@ -54,7 +54,9 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
   const ready = page.getByTestId('ready-to-assign');
   await expect(ready).toContainText('$2,000.00');
 
-  await setAssigned(page, 'Groceries', '1500');
+  // amounts can be typed with thousands commas
+  await setAssigned(page, 'Groceries', '1,500');
+  await expect(page.getByLabel('Assigned to Groceries')).toHaveValue('1,500.00');
   await setAssigned(page, 'Fun', '500');
   await expect(ready).toContainText('$0.00');
   await expect(ready).toContainText('All assigned');
@@ -97,15 +99,25 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
   const hero = page.getByTestId('zbb-hero').filter({ visible: true });
   await expect(hero).toContainText('All assigned');
   await expect(page.getByTestId('zbb-suggestion-all-good').filter({ visible: true })).toBeVisible();
-  await expect(page.getByTestId('zbb-health-Groceries').filter({ visible: true })).toContainText(
-    'On track',
-  );
+  // desktop shows categories as rings (mobile keeps the bar list)
+  await expect(page.getByTestId('zbb-ring-Groceries')).toContainText('On track');
   await page.goto('/budgets');
 
   // assigning more than exists shows the error state instead of being refused
   await setAssigned(page, 'Fun', '900');
   await expect(ready).toContainText('Over-assigned');
   await expect(ready).toContainText('-$500.00');
+  await setAssigned(page, 'Fun', '400');
+  await expect(ready).toContainText('All assigned');
+
+  // Move sends money back to Ready to Assign by default, no negative typing
+  await row(page, 'Fun').getByRole('button', { name: 'Move' }).click();
+  const moveDialog = page.getByRole('dialog');
+  await expect(moveDialog.getByLabel('To')).toHaveValue('ready-to-assign');
+  await moveDialog.getByLabel('Amount').fill('50');
+  await moveDialog.getByRole('button', { name: 'Move money' }).click();
+  await expect(ready).toContainText('$50.00');
+  await expect(row(page, 'Fun').getByTestId('zbb-available')).toHaveText('$350.00');
   await setAssigned(page, 'Fun', '400');
   await expect(ready).toContainText('All assigned');
 

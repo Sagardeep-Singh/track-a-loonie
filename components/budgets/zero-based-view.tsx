@@ -2,11 +2,14 @@
 
 import { useCallback, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRightLeft, Check, Target } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowRightLeft, Check, Goal, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input, Label, Select } from '@/components/ui/field';
+import { Label, Select } from '@/components/ui/field';
+import { MoneyInput } from '@/components/ui/money-input';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { BudgetRing } from '@/components/budgets/budget-ring';
+import { READY_TO_ASSIGN } from '@/lib/budgets/zero-based-math';
 import { deleteJSON, getJSON, patchJSON, postJSON, putJSON } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { monthLabel } from '@/lib/period-selection';
@@ -66,7 +69,14 @@ export const ZeroBasedView = ({
 }: {
   initialMonth: FrontendZbbMonth;
 }): React.ReactElement => {
-  const [data, setData] = useState(initialMonth);
+  const router = useRouter();
+  const [data, setMonthData] = useState(initialMonth);
+  // the screen updates from each response; the refresh is for the server-rendered
+  // parts around it, like the savings goal cards that count assignments
+  const setData = (next: FrontendZbbMonth): void => {
+    setMonthData(next);
+    router.refresh();
+  };
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -123,14 +133,15 @@ export const ZeroBasedView = ({
 
   const openMove = (category: FrontendZbbCategory): void => {
     const overspent = Number(category.available) < 0;
-    // "Cover" pulls money into an overspent row; "Move" pushes money out
+    // "Cover" pulls money into an overspent row from a funded one; "Move"
+    // pushes money out, back to Ready to Assign unless another row is picked
     const other = categories.find(
-      (c) => c.categoryId !== category.categoryId && (!overspent || Number(c.available) > 0),
+      (c) => c.categoryId !== category.categoryId && Number(c.available) > 0,
     );
     setMoveError(null);
     setMove({
       fromCategoryId: overspent ? (other?.categoryId ?? '') : category.categoryId,
-      toCategoryId: overspent ? category.categoryId : (other?.categoryId ?? ''),
+      toCategoryId: overspent ? category.categoryId : READY_TO_ASSIGN,
       amount: overspent ? Math.abs(Number(category.available)).toFixed(2) : '',
     });
   };
@@ -302,15 +313,27 @@ export const ZeroBasedView = ({
                         {Number(c.carriedIn) !== 0 && (
                           <span>{money(c.carriedIn)} carried in ·</span>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => openTarget(c)}
-                          className="hover:text-iris inline-flex items-center gap-1 whitespace-nowrap"
-                          aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
-                        >
-                          <Target size={12} />
-                          {c.target === null ? 'Set target' : `target ${money(c.target)}`}
-                        </button>
+                        {c.goal ? (
+                          // a goal's target is its monthly need; it's edited
+                          // from the Savings goals section, not as a limit
+                          <span
+                            className="inline-flex items-center gap-1 whitespace-nowrap"
+                            title={`Goal ${money(c.goal.targetAmount)} by ${monthLabel(c.goal.targetMonth)}`}
+                          >
+                            <Goal size={12} />
+                            {money(c.target ?? 0)} needed this month
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => openTarget(c)}
+                            className="hover:text-iris inline-flex items-center gap-1 whitespace-nowrap"
+                            aria-label={`${c.target === null ? 'Set' : 'Edit'} target for ${c.categoryName}`}
+                          >
+                            <Target size={12} />
+                            {c.target === null ? 'Set target' : `target ${money(c.target)}`}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -318,17 +341,12 @@ export const ZeroBasedView = ({
                     <label htmlFor={`assigned-${c.categoryId}`} className="sr-only">
                       Assigned to {c.categoryName}
                     </label>
-                    <Input
+                    <MoneyInput
                       id={`assigned-${c.categoryId}`}
-                      className="w-28 rounded-[9px] text-right font-mono max-sm:[appearance:textfield] max-sm:[&::-webkit-inner-spin-button]:appearance-none max-sm:[&::-webkit-outer-spin-button]:appearance-none"
-                      type="number"
-                      step="0.01"
-                      inputMode="decimal"
+                      className="w-28 rounded-[9px] text-right font-mono"
                       value={drafts[c.categoryId] ?? c.assigned}
                       disabled={savingId === c.categoryId}
-                      onChange={(e) =>
-                        setDrafts((prev) => ({ ...prev, [c.categoryId]: e.target.value }))
-                      }
+                      onValueChange={(v) => setDrafts((prev) => ({ ...prev, [c.categoryId]: v }))}
                       onBlur={() => saveAssigned(c)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') e.currentTarget.blur();
@@ -409,16 +427,12 @@ export const ZeroBasedView = ({
           >
             <div>
               <Label htmlFor="target-amount">Monthly target</Label>
-              <Input
+              <MoneyInput
                 id="target-amount"
                 className="font-mono"
-                type="number"
-                step="0.01"
-                min="0.01"
-                inputMode="decimal"
                 autoFocus
                 value={targetEdit.amount}
-                onChange={(e) => setTargetEdit({ ...targetEdit, amount: e.target.value })}
+                onValueChange={(v) => setTargetEdit({ ...targetEdit, amount: v })}
                 required
               />
               <p className="text-ink-muted mt-1 text-xs">
@@ -471,6 +485,7 @@ export const ZeroBasedView = ({
                 <option value="" disabled>
                   Pick a category
                 </option>
+                <option value={READY_TO_ASSIGN}>Ready to Assign ({money(ready)})</option>
                 {categories.map((c) => (
                   <option key={c.categoryId} value={c.categoryId}>
                     {c.categoryName} ({money(c.available)})
@@ -489,6 +504,7 @@ export const ZeroBasedView = ({
                 <option value="" disabled>
                   Pick a category
                 </option>
+                <option value={READY_TO_ASSIGN}>Ready to Assign ({money(ready)})</option>
                 {categories.map((c) => (
                   <option key={c.categoryId} value={c.categoryId}>
                     {c.categoryName} ({money(c.available)})
@@ -498,15 +514,11 @@ export const ZeroBasedView = ({
             </div>
             <div>
               <Label htmlFor="move-amount">Amount</Label>
-              <Input
+              <MoneyInput
                 id="move-amount"
                 className="font-mono"
-                type="number"
-                step="0.01"
-                min="0.01"
-                inputMode="decimal"
                 value={move.amount}
-                onChange={(e) => setMove({ ...move, amount: e.target.value })}
+                onValueChange={(v) => setMove({ ...move, amount: v })}
                 required
               />
             </div>

@@ -31,7 +31,7 @@ export const moveMoneySchema = z
     amount: moneySchema.refine((v) => v > 0, { message: 'Amount must be positive' }),
   })
   .refine((d) => d.fromCategoryId !== d.toCategoryId, {
-    message: 'Pick two different categories',
+    message: 'Pick two different places',
     path: ['toCategoryId'],
   });
 

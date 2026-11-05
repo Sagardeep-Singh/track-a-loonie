@@ -2,10 +2,10 @@ import { z } from 'zod';
 import { ACCOUNT_TYPE_VALUES } from '@/lib/account-types';
 import { SPREAD_MAX_MONTHS, SPREAD_MIN_MONTHS } from '@/lib/spread';
 
-export const USER_DATA_FORMAT_VERSION = 2;
-/** v1 predates zero-based budgeting; its files still import, with the
- * zero-based fields falling back to their defaults. */
-const SUPPORTED_FORMAT_VERSIONS = [1, USER_DATA_FORMAT_VERSION];
+export const USER_DATA_FORMAT_VERSION = 3;
+/** v1 predates zero-based budgeting and v2 predates savings goals; their
+ * files still import, with the newer fields falling back to their defaults. */
+const SUPPORTED_FORMAT_VERSIONS = [1, 2, USER_DATA_FORMAT_VERSION];
 /** Enforced by the route before this schema even runs — see the byte-length
  * re-check in `app/api/settings/import/route.ts`. Exported so the client's
  * size precheck and error copy can derive from the same number. */
@@ -123,6 +123,17 @@ const budgetSettingsSchema = z.strictObject({
   zbbStartMonth: budgetMonth.nullable(),
 });
 
+const savingsGoalSchema = z.strictObject({
+  id: z.string().min(1),
+  categoryId: z.string().min(1),
+  targetAmount: unsignedDecimal,
+  targetMonth: budgetMonth,
+  startMonth: budgetMonth,
+  startingAmount: unsignedDecimal,
+  archivedAt: z.coerce.date().nullable(),
+  createdAt: z.coerce.date(),
+});
+
 const categoryRuleSchema = z.strictObject({
   id: z.string().min(1),
   categoryId: z.string().min(1),
@@ -150,6 +161,8 @@ const dataSchema = z.strictObject({
   categoryAssignments: z.array(categoryAssignmentSchema).optional(),
   /** null = the user never changed the budgeting mode (LIMITS) */
   budgetSettings: budgetSettingsSchema.nullable().optional(),
+  /** v3+; absent in v1 and v2 files */
+  savingsGoals: z.array(savingsGoalSchema).optional(),
 });
 
 const findDuplicateKey = (keys: string[]): string | null => {
@@ -175,6 +188,7 @@ export const userDataFileSchema = z
   .superRefine((file, ctx) => {
     const { data } = file;
     const categoryAssignments = data.categoryAssignments ?? [];
+    const savingsGoals = data.savingsGoals ?? [];
     const totalRecords =
       data.accounts.length +
       data.categories.length +
@@ -183,7 +197,8 @@ export const userDataFileSchema = z
       data.budgets.length +
       data.categoryRules.length +
       data.reimbursementLinks.length +
-      categoryAssignments.length;
+      categoryAssignments.length +
+      savingsGoals.length;
     if (totalRecords > MAX_IMPORT_RECORDS) {
       ctx.addIssue({
         code: 'custom',
@@ -206,6 +221,7 @@ export const userDataFileSchema = z
       ['categoryRules', data.categoryRules],
       ['reimbursementLinks', data.reimbursementLinks],
       ['categoryAssignments', categoryAssignments],
+      ['savingsGoals', savingsGoals],
     ];
     for (const [path, rows] of idDuplicateChecks) {
       const duplicate = findDuplicateKey(rows.map((r) => r.id));
@@ -360,6 +376,42 @@ export const userDataFileSchema = z
         code: 'custom',
         path: ['data', 'categoryAssignments'],
         message: 'Duplicate assignment for the same category and month.',
+      });
+    }
+
+    const budgetedCategoryIds = new Set(data.budgets.map((b) => b.categoryId));
+    savingsGoals.forEach((goal, i) => {
+      const path = (field: string): (string | number)[] => ['data', 'savingsGoals', i, field];
+      if (!categoryIds.has(goal.categoryId)) {
+        ctx.addIssue({ code: 'custom', path: path('categoryId'), message: 'Unknown category.' });
+      }
+      if (budgetedCategoryIds.has(goal.categoryId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: path('categoryId'),
+          message: 'A category with a savings goal cannot also have a spending limit.',
+        });
+      }
+      if (goal.targetMonth < goal.startMonth) {
+        ctx.addIssue({
+          code: 'custom',
+          path: path('targetMonth'),
+          message: 'The target month cannot be before the start month.',
+        });
+      }
+      if (Number(goal.startingAmount) >= Number(goal.targetAmount)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: path('startingAmount'),
+          message: 'The starting amount must be less than the target.',
+        });
+      }
+    });
+    if (findDuplicateKey(savingsGoals.map((g) => g.categoryId))) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['data', 'savingsGoals'],
+        message: 'A category can have only one savings goal.',
       });
     }
 

@@ -15,6 +15,7 @@ const { prismaMock } = vi.hoisted(() => {
     },
     budget: { findMany: vi.fn() },
     reimbursementLink: { findMany: vi.fn() },
+    savingsGoal: { findMany: vi.fn() },
   };
   return {
     prismaMock: {
@@ -29,6 +30,7 @@ vi.mock('@/lib/db/prisma', () => ({ prisma: prismaMock }));
 const { assignToTargets, getZbbMonth, getZbbOverview, moveMoney, setAssignment, setBudgetMode } =
   await import('@/lib/services/zeroBased');
 const { ServiceValidationError } = await import('@/lib/services/common');
+const { READY_TO_ASSIGN } = await import('@/lib/budgets/zero-based-math');
 
 type TxRow = {
   id: string;
@@ -88,8 +90,20 @@ beforeEach(() => {
   prismaMock.categoryAssignment.findUnique.mockResolvedValue(null);
   prismaMock.budget.findMany.mockResolvedValue([]);
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
+  prismaMock.savingsGoal.findMany.mockResolvedValue([]);
   mockTransactions({});
 });
+
+const savingsGoal = {
+  id: 'g1',
+  categoryId: 'save',
+  targetAmount: 3000,
+  targetMonth: 202708,
+  startMonth: 202610,
+  startingAmount: 0,
+  archivedAt: null,
+  category: { name: 'Savings' },
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -166,6 +180,7 @@ describe('getZbbMonth', () => {
       target: null,
       targetBudgetId: null,
       targetMonth: null,
+      goal: null,
     });
     // balances only ever read on-budget accounts
     expect(prismaMock.transaction.groupBy).toHaveBeenCalledWith(
@@ -366,6 +381,49 @@ describe('moveMoney', () => {
       }),
     );
   });
+
+  it('moves carried-in money back to Ready to Assign as a negative assignment', async () => {
+    zeroBased();
+
+    await moveMoney('user-1', {
+      fromCategoryId: 'save',
+      toCategoryId: READY_TO_ASSIGN,
+      month: 202610,
+      amount: 200,
+    });
+
+    // only the real category is checked and written; Ready to Assign has no cell
+    expect(prismaMock.category.count).toHaveBeenCalledWith({
+      where: { userId: 'user-1', id: { in: ['save'] } },
+    });
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_categoryId_month: { userId: 'user-1', categoryId: 'save', month: 202610 } },
+        update: { amount: '-200.00' },
+      }),
+    );
+  });
+
+  it('assigns from Ready to Assign on top of what the category already has', async () => {
+    zeroBased();
+    prismaMock.categoryAssignment.findUnique.mockResolvedValue({ amount: 50 });
+
+    await moveMoney('user-1', {
+      fromCategoryId: READY_TO_ASSIGN,
+      toCategoryId: 'food',
+      month: 202610,
+      amount: 25,
+    });
+
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_categoryId_month: { userId: 'user-1', categoryId: 'food', month: 202610 } },
+        update: { amount: '75.00' },
+      }),
+    );
+  });
 });
 
 describe('assignToTargets', () => {
@@ -396,6 +454,46 @@ describe('assignToTargets', () => {
       'needs $600.00 but only $100.00',
     );
     expect(prismaMock.categoryAssignment.upsert).not.toHaveBeenCalled();
+  });
+
+  it("tops a savings goal up to this month's need, not its balance", async () => {
+    prismaMock.savingsGoal.findMany.mockResolvedValue([savingsGoal]);
+    prismaMock.account.findMany.mockImplementation(
+      async (args: { where: { onBudget?: boolean } }) =>
+        args.where.onBudget ? [{ id: 'chq' }] : [{ startingBalance: 5000 }],
+    );
+    prismaMock.categoryAssignment.findMany.mockResolvedValue([
+      { categoryId: 'save', month: 202610, amount: 100 },
+    ]);
+
+    await assignToTargets('user-1', 202610);
+
+    expect(prismaMock.categoryAssignment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_categoryId_month: { userId: 'user-1', categoryId: 'save', month: 202610 } },
+        update: { amount: '272.73' },
+      }),
+    );
+  });
+});
+
+describe('getZbbMonth with savings goals', () => {
+  it("uses the goal's monthly need as the target and marks the row", async () => {
+    zeroBased();
+    prismaMock.savingsGoal.findMany.mockResolvedValue([savingsGoal]);
+    prismaMock.budget.findMany.mockResolvedValue([
+      { id: 'b1', categoryId: 'food', month: 202609, limitAmount: 600 },
+    ]);
+
+    const result = await getZbbMonth('user-1', 202610);
+    const save = result.categories.find((c) => c.categoryId === 'save')!;
+    const food = result.categories.find((c) => c.categoryId === 'food')!;
+
+    expect(save.target).toBe('272.73');
+    expect(save.goal).toEqual({ goalId: 'g1', targetAmount: '3000.00', targetMonth: 202708 });
+    expect(save.targetBudgetId).toBeNull();
+    expect(food.goal).toBeNull();
+    expect(food.target).toBe('600.00');
   });
 });
 

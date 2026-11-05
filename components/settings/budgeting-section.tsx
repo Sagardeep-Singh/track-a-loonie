@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { pillOption } from '@/components/settings/pills';
 import { PillGroup, PillHighlight } from '@/components/settings/pill-group';
 import { Button } from '@/components/ui/button';
+import { writeBudgetModeCookie } from '@/lib/budget-mode-cookie';
 import { patchJSON } from '@/lib/api-client';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { BudgetMode, FrontendBudgetSettings } from '@/lib/services/zeroBased';
@@ -45,6 +46,7 @@ export const BudgetingSection = ({
       return false;
     }
     setMode(res.data.mode);
+    writeBudgetModeCookie(res.data.mode);
     router.refresh();
     return true;
   };

@@ -5,6 +5,7 @@ import { Check, Loader2 } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
+import { MoneyInput } from '@/components/ui/money-input';
 import { Money } from '@/components/ui/money';
 import { formatDate } from '@/lib/format';
 import { getJSON, postJSON } from '@/lib/api-client';
@@ -126,14 +127,10 @@ export const ReimbursementLinkPicker = ({
         {selected && (
           <div className="mt-2 pl-3">
             <Label htmlFor={`link-amount-${candidate.transactionId}`}>Amount to link</Label>
-            <Input
+            <MoneyInput
               id={`link-amount-${candidate.transactionId}`}
-              type="number"
-              step="0.01"
-              min="0.01"
-              max={candidate.availableAmount}
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onValueChange={setAmount}
             />
             {confirmError && (
               <p className="text-rose mt-1 text-xs" role="alert">

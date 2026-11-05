@@ -326,3 +326,14 @@ dialog[open] {
   margin: auto;
   animation: dialog-in 0.18s ease-out;
 }
+
+/* Spinner arrows look out of place on the remaining whole-number fields
+   (priority, statement day); typing or the keypad is the way in. */
+input[type='number'] {
+  appearance: textfield;
+}
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}

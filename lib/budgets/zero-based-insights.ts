@@ -17,6 +17,8 @@ export type ZbbInsightCategory = {
   activityCents: number;
   availableCents: number;
   targetCents: number | null;
+  /** a savings goal: its target is this month's contribution, not a balance */
+  isGoal?: boolean;
 };
 
 export type CategoryHealthStatus = 'overspent' | 'at-risk' | 'underfunded' | 'funded';
@@ -90,11 +92,21 @@ const categoriesLabel = (n: number): string => `${n} ${n === 1 ? 'category' : 'c
 
 const healthOf = (c: ZbbInsightCategory, today: ZbbInsightInput['today']): CategoryHealth => {
   const fundedCents = c.carriedInCents + c.assignedCents;
+  // a goal's target is what to assign this month, so carried-in savings don't count toward it
   const targetShortfallCents =
-    c.targetCents === null ? 0 : Math.max(0, c.targetCents - fundedCents);
+    c.targetCents === null
+      ? 0
+      : Math.max(0, c.targetCents - (c.isGoal ? c.assignedCents : fundedCents));
 
+  // spending a goal down is the point of it, not a pace to warn about
   let runOutDay: number | null = null;
-  if (today && c.activityCents > 0 && c.availableCents > 0 && today.day < today.daysInMonth) {
+  if (
+    !c.isGoal &&
+    today &&
+    c.activityCents > 0 &&
+    c.availableCents > 0 &&
+    today.day < today.daysInMonth
+  ) {
     const perDay = c.activityCents / today.day;
     const day = Math.floor(today.day + c.availableCents / perDay);
     if (day < today.daysInMonth) runOutDay = Math.max(day, today.day);
