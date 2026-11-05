@@ -7,8 +7,13 @@ export type TransactionSummary = {
   net: number;
   payments: number;
   transfers: number;
+  /** the INCOME-side part of `payments` / `transfers`; the rest is outflow */
+  paymentsIncome: number;
+  transfersIncome: number;
   reimbursementIncome: number;
 };
+
+export type TotalsInclusion = { payments: boolean; transfers: boolean };
 
 type SummaryInput = Pick<
   FrontendTransaction,
@@ -65,8 +70,10 @@ export const summarizeTransactions = (
       // "Payments (excluded)" treatment once transfer matching also flags it
       if (t.isPayment) {
         acc.payments += amount;
+        if (t.type === 'INCOME') acc.paymentsIncome += amount;
       } else if (t.isTransfer) {
         acc.transfers += amount;
+        if (t.type === 'INCOME') acc.transfersIncome += amount;
       } else if (t.isReimbursementIncome) {
         const reimbursed = reimbursementIncomeAmount(t, amount);
         acc.reimbursementIncome += reimbursed;
@@ -78,11 +85,37 @@ export const summarizeTransactions = (
       }
       return acc;
     },
-    { credit: 0, debit: 0, payments: 0, transfers: 0, reimbursementIncome: 0 },
+    {
+      credit: 0,
+      debit: 0,
+      payments: 0,
+      transfers: 0,
+      paymentsIncome: 0,
+      transfersIncome: 0,
+      reimbursementIncome: 0,
+    },
   );
   if (!inExpenseMonth) {
     summary.debit = Math.max(0, summary.debit - summary.reimbursementIncome);
     summary.reimbursementIncome = 0;
   }
   return { ...summary, count: list.length, net: summary.credit - summary.debit };
+};
+
+/** Folds payments and/or transfers back into credit/debit/net, each by its
+ * own direction (income legs into credit, expense legs into debit). */
+export const includeInTotals = (
+  summary: TransactionSummary,
+  inclusion: TotalsInclusion,
+): TransactionSummary => {
+  let { credit, debit } = summary;
+  if (inclusion.payments) {
+    credit += summary.paymentsIncome;
+    debit += summary.payments - summary.paymentsIncome;
+  }
+  if (inclusion.transfers) {
+    credit += summary.transfersIncome;
+    debit += summary.transfers - summary.transfersIncome;
+  }
+  return { ...summary, credit, debit, net: credit - debit };
 };

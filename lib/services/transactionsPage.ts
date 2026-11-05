@@ -41,6 +41,8 @@ export type TransactionSummary = {
   debit: string;
   payments: string;
   transfers: string;
+  paymentsIncome: string;
+  transfersIncome: string;
   reimbursementIncome: string;
   net: string;
 };
@@ -254,6 +256,8 @@ const summarizeRows = (rows: SummaryRow[], inExpenseMonth: boolean): Transaction
     debit: totals.debit.toFixed(2),
     payments: totals.payments.toFixed(2),
     transfers: totals.transfers.toFixed(2),
+    paymentsIncome: totals.paymentsIncome.toFixed(2),
+    transfersIncome: totals.transfersIncome.toFixed(2),
     reimbursementIncome: totals.reimbursementIncome.toFixed(2),
     net: totals.net.toFixed(2),
   };
