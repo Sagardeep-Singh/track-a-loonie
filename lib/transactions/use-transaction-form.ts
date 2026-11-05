@@ -74,8 +74,20 @@ export const useTransactionForm = ({
   const [suggested, setSuggested] = useState(false);
   const [type, setType] = useState<string>(transaction?.type ?? 'EXPENSE');
   const [accountId, setAccountId] = useState(transaction?.accountId ?? accounts[0]?.id ?? '');
-  const [isPayment, setIsPayment] = useState(transaction?.isPayment ?? false);
-  const [isTransfer, setIsTransfer] = useState(transaction?.isTransfer ?? false);
+  const [isPayment, setIsPaymentState] = useState(transaction?.isPayment ?? false);
+  // payment and transfer are mutually exclusive; an older row carrying both
+  // opens as a payment only
+  const [isTransfer, setIsTransferState] = useState(
+    (transaction?.isTransfer ?? false) && !transaction?.isPayment,
+  );
+  const setIsPayment = (value: boolean): void => {
+    setIsPaymentState(value);
+    if (value) setIsTransferState(false);
+  };
+  const setIsTransfer = (value: boolean): void => {
+    setIsTransferState(value);
+    if (value) setIsPaymentState(false);
+  };
   const [isReimbursable, setIsReimbursable] = useState(transaction?.isReimbursable ?? false);
   const [reimbursementExpectedAmount, setReimbursementExpectedAmount] = useState(
     transaction?.reimbursementExpectedAmount ?? '',

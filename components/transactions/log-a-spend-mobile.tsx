@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
+import { InfoPopover } from '@/components/ui/info-popover';
 import { NumericKeypad } from '@/components/ui/numeric-keypad';
 import { isValidKeypadAmount } from '@/lib/ui/numeric-keypad';
 import { isDesktopViewport } from '@/lib/ui/viewport';
@@ -236,25 +237,37 @@ export const LogASpendMobile = ({
             />
           </div>
           {canBePayment && (
+            <div className="flex items-center gap-1.5">
+              <label className="text-ink flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={isPayment}
+                  onChange={(e) => setIsPayment(e.target.checked)}
+                  className="accent-iris h-4 w-4"
+                />
+                Card payment
+              </label>
+              <InfoPopover label="About card payments">
+                A payment toward the card&apos;s balance. It&apos;s excluded from the statement
+                total and can&apos;t also be a transfer.
+              </InfoPopover>
+            </div>
+          )}
+          <div className="flex items-center gap-1.5">
             <label className="text-ink flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                checked={isPayment}
-                onChange={(e) => setIsPayment(e.target.checked)}
+                checked={isTransfer}
+                onChange={(e) => setIsTransfer(e.target.checked)}
                 className="accent-iris h-4 w-4"
               />
-              This is a payment toward the card&apos;s balance
+              Transfer
             </label>
-          )}
-          <label className="text-ink flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={isTransfer}
-              onChange={(e) => setIsTransfer(e.target.checked)}
-              className="accent-iris h-4 w-4"
-            />
-            This is a transfer between my own accounts
-          </label>
+            <InfoPopover label="About transfers">
+              Money moved between your own accounts. It&apos;s excluded from income and spending
+              {canBePayment && <> and can&apos;t also be a card payment</>}.
+            </InfoPopover>
+          </div>
           <div>
             <Label htmlFor="mobile-categoryId">
               Category{suggested && <span className="text-iris ml-1">(suggested)</span>}

@@ -124,6 +124,13 @@ export const transactionsHref = (filters: Partial<TransactionFilters>): string =
   return query ? `/transactions?${query}` : '/transactions';
 };
 
+/** A `/transactions` link scoped to the transaction's day that opens its
+ * detail drawer. `date` is the ISO date the API returns. */
+export const transactionDetailHref = (date: string, transactionId: string): string => {
+  const day = date.slice(0, 10);
+  return `${transactionsHref({ from: day, to: day })}&tx=${encodeURIComponent(transactionId)}`;
+};
+
 /** Every clause a transaction must pass to remain visible under the current
  * filters, including the period selector's `from`/`to` (the credit card
  * statement view writes into the same pair).

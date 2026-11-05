@@ -181,13 +181,29 @@ const refineSpread = (
   }
 };
 
+/** A card payment and a transfer are mutually exclusive. */
+const refinePaymentTransfer = (
+  v: { isPayment?: boolean; isTransfer?: boolean },
+  ctx: z.RefinementCtx,
+): void => {
+  if (v.isPayment === true && v.isTransfer === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['isTransfer'],
+      message: 'A card payment cannot also be a transfer',
+    });
+  }
+};
+
 export const createTransactionSchema = transactionFieldsSchema
   .superRefine(refineReimbursable)
-  .superRefine(refineSpread);
+  .superRefine(refineSpread)
+  .superRefine(refinePaymentTransfer);
 export const updateTransactionSchema = transactionFieldsSchema
   .partial()
   .superRefine(refineReimbursable)
-  .superRefine(refineSpread);
+  .superRefine(refineSpread)
+  .superRefine(refinePaymentTransfer);
 
 export const listTransactionsQuerySchema = z.object({
   accountId: z.string().optional(),

@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Select } from '@/components/ui/field';
+import { InfoPopover } from '@/components/ui/info-popover';
 import { MoneyInput } from '@/components/ui/money-input';
 import { ReimbursementPanel } from '@/components/transactions/reimbursement-panel';
 import { useTransactionForm } from '@/lib/transactions/use-transaction-form';
@@ -68,6 +69,20 @@ export const TransactionForm = ({
   const hasReimbursementLinks = Number(linkedTotal) > 0;
   const preview = isSpread ? spreadPreview(amountValue, spreadStartMonth, spreadMonths) : null;
 
+  // the expected reimbursement defaults to the full amount and follows amount
+  // edits until the user types a different figure
+  const toggleReimbursable = (checked: boolean): void => {
+    if (checked && !reimbursementExpectedAmount) setReimbursementExpectedAmount(amountValue);
+    setIsReimbursable(checked);
+  };
+
+  const changeAmount = (value: string): void => {
+    if (isReimbursable && reimbursementExpectedAmount === amountValue) {
+      setReimbursementExpectedAmount(value);
+    }
+    setAmountValue(value);
+  };
+
   const toggleSpread = (checked: boolean): void => {
     setSpreadError(null);
     // default the window to the transaction's own month the first time
@@ -123,7 +138,7 @@ export const TransactionForm = ({
           name="amount"
           placeholder="0.00"
           defaultValue={transaction?.amount}
-          onValueChange={setAmountValue}
+          onValueChange={changeAmount}
           required
           className="placeholder:text-ink-muted/50 border-0 bg-transparent p-0 font-mono text-[30px] tracking-[-0.03em] tabular-nums shadow-none outline-none focus:border-0"
         />
@@ -181,40 +196,55 @@ export const TransactionForm = ({
         </div>
       </div>
       {canBePayment && (
-        <label className="text-ink flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={isPayment}
-            onChange={(e) => setIsPayment(e.target.checked)}
-            className="accent-iris h-4 w-4"
-          />
-          This is a payment toward the card&apos;s balance
-          <span className="text-ink-muted text-xs">(excluded from the statement total)</span>
-        </label>
-      )}
-      <label className="text-ink flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={isTransfer}
-          onChange={(e) => setIsTransfer(e.target.checked)}
-          className="accent-iris h-4 w-4"
-        />
-        This is a transfer between my own accounts
-        <span className="text-ink-muted text-xs">(excluded from income and spending)</span>
-      </label>
-      {canBeReimbursable && (
-        <div>
+        <div className="flex items-center gap-1.5">
           <label className="text-ink flex items-center gap-2 text-sm">
             <input
               type="checkbox"
-              checked={isReimbursable}
-              disabled={hasReimbursementLinks || isSpread}
-              onChange={(e) => setIsReimbursable(e.target.checked)}
+              checked={isPayment}
+              onChange={(e) => setIsPayment(e.target.checked)}
               className="accent-iris h-4 w-4"
             />
-            This expense will be paid back to me
-            <span className="text-ink-muted text-xs">(excluded income when repaid)</span>
+            Card payment
           </label>
+          <InfoPopover label="About card payments">
+            A payment toward the card&apos;s balance. It&apos;s excluded from the statement total
+            and can&apos;t also be a transfer.
+          </InfoPopover>
+        </div>
+      )}
+      <div className="flex items-center gap-1.5">
+        <label className="text-ink flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={isTransfer}
+            onChange={(e) => setIsTransfer(e.target.checked)}
+            className="accent-iris h-4 w-4"
+          />
+          Transfer
+        </label>
+        <InfoPopover label="About transfers">
+          Money moved between your own accounts. It&apos;s excluded from income and spending
+          {canBePayment && <> and can&apos;t also be a card payment</>}.
+        </InfoPopover>
+      </div>
+      {canBeReimbursable && (
+        <div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-ink flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={isReimbursable}
+                disabled={hasReimbursementLinks || isSpread}
+                onChange={(e) => toggleReimbursable(e.target.checked)}
+                className="accent-iris h-4 w-4"
+              />
+              Reimbursable
+            </label>
+            <InfoPopover label="About reimbursable expenses">
+              This expense will be paid back to you. Income you link to it as repayment isn&apos;t
+              counted as income.
+            </InfoPopover>
+          </div>
           {hasReimbursementLinks && (
             <p className="text-ink-muted mt-1 pl-6 text-xs">
               Remove all links below to unmark this expense as reimbursable.

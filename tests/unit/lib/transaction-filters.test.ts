@@ -7,6 +7,7 @@ import {
   parseTransactionFilters,
   transactionFiltersToSearchParams,
   transactionsHref,
+  transactionDetailHref,
   type TransactionFilters,
 } from '@/lib/transactions/transaction-filters';
 import type { FrontendTransaction } from '@/lib/services/transactions';
@@ -287,6 +288,20 @@ describe('transactionsHref', () => {
       categoryIds: ['cat-1'],
       type: 'EXPENSE',
       hideTransfers: true,
+    });
+  });
+});
+
+describe('transactionDetailHref', () => {
+  it("scopes the list to the transaction's day and opens its drawer", () => {
+    const href = transactionDetailHref('2026-03-14T00:00:00.000Z', 'tx 1');
+    expect(href).toBe('/transactions?from=2026-03-14&to=2026-03-14&tx=tx%201');
+    const params = new URLSearchParams(href.split('?')[1]);
+    expect(params.get('tx')).toBe('tx 1');
+    expect(parseTransactionFilters(params)).toEqual({
+      ...DEFAULT_TRANSACTION_FILTERS,
+      from: '2026-03-14',
+      to: '2026-03-14',
     });
   });
 });

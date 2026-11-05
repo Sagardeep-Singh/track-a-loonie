@@ -121,7 +121,7 @@ test('reimbursable and spread cannot both be on', async ({ page }) => {
   await drawer.locator('#amount').fill('50');
 
   const spread = drawer.getByLabel(/Spread this cost over several months/);
-  const reimbursable = drawer.getByLabel(/This expense will be paid back to me/);
+  const reimbursable = drawer.getByLabel('Reimbursable', { exact: true });
 
   await spread.check();
   await expect(reimbursable).toBeDisabled();

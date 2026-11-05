@@ -21,6 +21,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Money } from '@/components/ui/money';
 import { TransactionTotals } from '@/components/transactions/transaction-totals';
 import { TransactionForm } from '@/components/transactions/transaction-form';
+import { ReimbursedExpensesList } from '@/components/transactions/reimbursed-expenses-list';
 import { AddTransactionLink } from '@/components/transactions/add-transaction-link';
 import { TransactionFiltersDialog } from '@/components/transactions/transaction-filters-dialog';
 import { MatchTransfersDialog } from '@/components/transactions/match-transfers-dialog';
@@ -321,6 +322,25 @@ export const TransactionsView = ({
   // Page 1 for the current key is loading; old rows stay, dimmed.
   const pending = requestKey !== pagesKey && scopeError?.key !== requestKey;
   const currentScopeError = scopeError?.key === requestKey ? scopeError.kind : null;
+
+  // A `?tx=` that arrives after mount (a link from another drawer) opens that
+  // row once its page has loaded. The initial value is handled by `detail`'s initializer.
+  const txParam = searchParams.get('tx');
+  const [txSyncedFrom, setTxSyncedFrom] = useState(txParam);
+  const [pendingTxId, setPendingTxId] = useState<string | null>(null);
+  if (txParam !== txSyncedFrom) {
+    setTxSyncedFrom(txParam);
+    setPendingTxId(txParam);
+  }
+  if (pendingTxId && !pending) {
+    setPendingTxId(null);
+    const row = pages.flatMap((p) => p.rows).find((t) => t.id === pendingTxId);
+    if (row) {
+      setDetail(row);
+      setDetailOpen(true);
+      setDrawerKey((k) => k + 1);
+    }
+  }
 
   useEffect(() => {
     pagesKeyRef.current = pagesKey;
@@ -904,6 +924,9 @@ export const TransactionsView = ({
                 }}
               />
             </div>
+            {detail.type === 'INCOME' && detail.isReimbursementIncome && (
+              <ReimbursedExpensesList incomeTransactionId={detail.id} />
+            )}
             {detail.importBatchFilename && detail.importBatchId && (
               <Link
                 href={`/import/history/${detail.importBatchId}`}
