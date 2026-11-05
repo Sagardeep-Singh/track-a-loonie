@@ -492,7 +492,8 @@ test('8. totals card keeps bucket precedence, nets reimbursed spending and toggl
   // payment AND transfer (30) counts toward payments only
   await expect(toggle('Payments')).toContainText('$230.00');
   await expect(toggle('Transfers')).toContainText('$50.00');
-  await expect(bar.getByText('Not in totals: Reimbursements')).toContainText('$40.00');
+  // the $40 payback is netted from Debit by default, so it isn't listed as kept out
+  await expect(bar.getByText('Not in totals: Reimbursements')).toHaveCount(0);
 
   // included by default: $230 of payment income in Credit, the $50 transfer out in Debit
   await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'true');
@@ -506,9 +507,23 @@ test('8. totals card keeps bucket precedence, nets reimbursed spending and toggl
   await expect(toggle('Payments')).toHaveAttribute('aria-pressed', 'false');
   // the $40 payback is linked reimbursement income, so it is NOT credit
   await expect(stat('Credit')).toContainText('100.00');
-  // the $40 lunch is fully reimbursed, so it nets out of Debit (like Overview's Out)
+  // the $40 payback lands in the same view, so it comes off Debit (like
+  // Overview's Out in the month the money arrives)
   await expect(stat('Debit')).toContainText('0.00');
   await expect(stat('Net')).toContainText('100.00');
+});
+
+test('8c. rows carry Reimbursement, Payment, Transfer and Reimbursable badges', async () => {
+  await visit([ids.chips]);
+  const badges = (payee: string): Locator =>
+    row(`${payee} ${stamp}`).getByTestId('transaction-badge');
+  await expect(badges('Chips Payback')).toHaveText(['Reimbursement']);
+  await expect(badges('Chips Payment')).toHaveText(['Payment']);
+  // a payment that's also a matched transfer reads as a payment only
+  await expect(badges('Chips Payment+Transfer')).toHaveText(['Payment']);
+  await expect(badges('Chips Transfer')).toHaveText(['Transfer']);
+  await expect(badges('Chips Work Lunch')).toHaveText(['Reimbursable · reimbursed']);
+  await expect(badges('Chips Salary')).toHaveCount(0);
 });
 
 test('8b. the pending reimbursements filter narrows server-side', async () => {

@@ -16,6 +16,10 @@ const { prismaMock } = vi.hoisted(() => ({
     },
     reimbursementLink: {
       findMany: vi.fn(),
+      groupBy: vi.fn(),
+    },
+    userBudgetSettings: {
+      findUnique: vi.fn(),
     },
     savingsGoal: {
       count: vi.fn(),
@@ -31,6 +35,8 @@ const { ServiceValidationError } = await import('@/lib/services/common');
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.findMany.mockResolvedValue([]);
+  prismaMock.reimbursementLink.groupBy.mockResolvedValue([]);
+  prismaMock.userBudgetSettings.findUnique.mockResolvedValue(null);
   prismaMock.transaction.findMany.mockResolvedValue([]);
   prismaMock.savingsGoal.count.mockResolvedValue(0);
 });
@@ -207,7 +213,13 @@ describe('listBudgets', () => {
   });
 });
 
-describe('listBudgets reimbursement net-out', () => {
+describe('listBudgets reimbursement net-out (expense-month setting)', () => {
+  beforeEach(() => {
+    prismaMock.userBudgetSettings.findUnique.mockResolvedValue({
+      reimbursementsInExpenseMonth: true,
+    });
+  });
+
   it('subtracts the reimbursed amount from spend for that category', async () => {
     prismaMock.budget.findMany.mockResolvedValue([
       {
@@ -261,7 +273,7 @@ describe('listBudgets reimbursement net-out', () => {
   });
 
   it('nets out by the expense date, independent of when the reimbursement was recorded', async () => {
-    // listReimbursedAmountsByExpenseDate is itself scoped by [start, end) on the expense's
+    // listReimbursedAmounts is itself scoped by [start, end) on the expense's
     // date — this mock only proves listBudgets applies whatever it returns, keyed by
     // categoryId, without re-deriving month scoping of its own.
     prismaMock.budget.findMany.mockResolvedValue([
@@ -331,5 +343,69 @@ describe('createBudget', () => {
       where: { userId: 'user-1', categoryId: 'cat-1' },
     });
     expect(prismaMock.budget.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('listBudgets reimbursement net-out (default: month the money arrives)', () => {
+  const marchBudget = [
+    {
+      id: 'b1',
+      categoryId: 'cat-1',
+      month: 202603,
+      limitAmount: 200,
+      category: { name: 'Groceries' },
+    },
+  ];
+
+  it('lowers the month a January expense was paid back in, not January', async () => {
+    prismaMock.budget.findMany.mockResolvedValue(marchBudget);
+    prismaMock.transaction.groupBy.mockResolvedValue([
+      { categoryId: 'cat-1', _sum: { amount: 90 } },
+    ]);
+    prismaMock.reimbursementLink.findMany.mockResolvedValue([
+      {
+        amount: 40,
+        expenseTransactionId: 'tx-jan',
+        createdAt: new Date('2026-03-04'),
+        income: { date: new Date('2026-03-04') },
+        expense: { categoryId: 'cat-1', date: new Date('2026-01-10'), amount: 100 },
+      },
+    ]);
+
+    const result = await listBudgets('user-1', 202603);
+
+    expect(result[0].spent).toBe('50.00');
+    expect(prismaMock.reimbursementLink.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: 'user-1',
+          income: { date: { gte: new Date('2026-03-01'), lt: new Date('2026-04-01') } },
+        }),
+      }),
+    );
+  });
+
+  it('caps a link at what is left of its expense after earlier reimbursements', async () => {
+    prismaMock.budget.findMany.mockResolvedValue(marchBudget);
+    prismaMock.transaction.groupBy.mockResolvedValue([
+      { categoryId: 'cat-1', _sum: { amount: 90 } },
+    ]);
+    prismaMock.reimbursementLink.findMany.mockResolvedValue([
+      {
+        amount: 60,
+        expenseTransactionId: 'tx-jan',
+        createdAt: new Date('2026-03-04'),
+        income: { date: new Date('2026-03-04') },
+        expense: { categoryId: 'cat-1', date: new Date('2026-01-10'), amount: 100 },
+      },
+    ]);
+    // 70 of the 100 was already paid back in February
+    prismaMock.reimbursementLink.groupBy.mockResolvedValue([
+      { expenseTransactionId: 'tx-jan', _sum: { amount: 70 } },
+    ]);
+
+    const result = await listBudgets('user-1', 202603);
+
+    expect(result[0].spent).toBe('60.00');
   });
 });

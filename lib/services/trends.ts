@@ -1,6 +1,6 @@
 import { monthRange } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
-import { listReimbursedAmountsByExpenseDate } from '@/lib/services/reimbursements';
+import { listReimbursedAmounts } from '@/lib/services/reimbursements';
 import { getGoalEffects } from '@/lib/services/savingsGoals';
 import { listSpreadSharesInRange } from '@/lib/services/spreadExpenses';
 
@@ -97,16 +97,25 @@ export const getSpendingTrends = async (
         reimbursementIncomeLinks: { select: { amount: true } },
       },
     }),
-    listReimbursedAmountsByExpenseDate(userId, rangeStart, rangeEndDate),
+    listReimbursedAmounts(userId, rangeStart, rangeEndDate),
     listSpreadSharesInRange(userId, allMonths[0], allMonths[allMonths.length - 1]),
     getGoalEffects(userId, allMonths[allMonths.length - 1]),
   ]);
 
+  const monthOf = (date: Date): number => date.getUTCFullYear() * 100 + (date.getUTCMonth() + 1);
+
   // Reimbursed amount per expense — nets out of every expense sum below,
   // mirroring lib/services/budgets.ts, so movers/category totals reflect
-  // out-of-pocket spend rather than gross.
+  // out-of-pocket spend rather than gross. One that counts in a different
+  // month than its expense (counted when its money arrived) comes off that
+  // month's category total instead, clamped at 0.
   const reimbursedByTransaction = new Map<string, number>();
+  const otherMonthReimbursements: typeof reimbursedExpenses = [];
   for (const r of reimbursedExpenses) {
+    if (monthOf(new Date(r.date)) !== monthOf(new Date(r.expenseDate))) {
+      otherMonthReimbursements.push(r);
+      continue;
+    }
     reimbursedByTransaction.set(
       r.expenseTransactionId,
       (reimbursedByTransaction.get(r.expenseTransactionId) ?? 0) + Number(r.amount),
@@ -128,8 +137,6 @@ export const getSpendingTrends = async (
       0,
       Number(t.amount) - t.reimbursementIncomeLinks.reduce((sum, l) => sum + Number(l.amount), 0),
     );
-
-  const monthOf = (date: Date): number => date.getUTCFullYear() * 100 + (date.getUTCMonth() + 1);
 
   // Same income/expense filters as getOverviewData: both legs of an
   // inter-account transfer never count as spending or income, and the linked
@@ -193,6 +200,16 @@ export const getSpendingTrends = async (
       Number(share.amount),
       firstInCurrentRange,
     );
+  }
+
+  for (const r of otherMonthReimbursements) {
+    const m = monthOf(new Date(r.date));
+    const perMonth = categoryMonthTotals.get(r.categoryId ?? UNCATEGORIZED_ID);
+    const bucket = monthTotals.get(m);
+    if (!perMonth || !bucket) continue;
+    const applied = Math.min(perMonth.get(m) ?? 0, Number(r.amount));
+    perMonth.set(m, Math.round(((perMonth.get(m) ?? 0) - applied) * 100) / 100);
+    bucket.expense = Math.max(0, bucket.expense - applied);
   }
 
   const months: TrendsMonth[] = currentMonths.map((m) => ({

@@ -293,6 +293,9 @@ model UserBudgetSettings {
   /// is enabled and kept when switching back to LIMITS, so re-enabling
   /// resumes instead of starting over
   zbbStartMonth Int?
+  /// false (default): a reimbursement lowers spending in the month its money
+  /// arrives, so past months don't shift. true: it lowers the expense's month
+  reimbursementsInExpenseMonth Boolean @default(false)
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
