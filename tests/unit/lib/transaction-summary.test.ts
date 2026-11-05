@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeTransactions } from '@/lib/transactions/transaction-summary';
+import { includeInTotals, summarizeTransactions } from '@/lib/transactions/transaction-summary';
 
 const tx = (
   overrides: Partial<Parameters<typeof summarizeTransactions>[0][number]> = {},
@@ -21,6 +21,8 @@ describe('summarizeTransactions', () => {
       net: 0,
       payments: 0,
       transfers: 0,
+      paymentsIncome: 0,
+      transfersIncome: 0,
       reimbursementIncome: 0,
     });
   });
@@ -112,5 +114,54 @@ describe('summarizeTransactions', () => {
       }),
     ]);
     expect(summary.debit).toBeCloseTo(50);
+  });
+});
+
+describe('includeInTotals', () => {
+  const summary = summarizeTransactions([
+    tx({ type: 'INCOME', amount: '100' }),
+    tx({ amount: '40' }),
+    tx({ type: 'INCOME', amount: '500', isPayment: true }),
+    tx({ amount: '500', isPayment: true }),
+    tx({ amount: '200', isTransfer: true }),
+    tx({ type: 'INCOME', amount: '150', isTransfer: true }),
+  ]);
+
+  it('splits payments and transfers by direction', () => {
+    expect(summary).toMatchObject({
+      payments: 1000,
+      paymentsIncome: 500,
+      transfers: 350,
+      transfersIncome: 150,
+    });
+  });
+
+  it('leaves the totals untouched when both are excluded', () => {
+    expect(includeInTotals(summary, { payments: false, transfers: false })).toEqual(summary);
+  });
+
+  it('adds payments by direction when included', () => {
+    expect(includeInTotals(summary, { payments: true, transfers: false })).toMatchObject({
+      credit: 600,
+      debit: 540,
+      net: 60,
+    });
+  });
+
+  it('adds transfers by direction when included', () => {
+    expect(includeInTotals(summary, { payments: false, transfers: true })).toMatchObject({
+      credit: 250,
+      debit: 240,
+      net: 10,
+    });
+  });
+
+  it('adds both when both are included', () => {
+    expect(includeInTotals(summary, { payments: true, transfers: true })).toMatchObject({
+      credit: 750,
+      debit: 740,
+      net: 10,
+      count: 6,
+    });
   });
 });
