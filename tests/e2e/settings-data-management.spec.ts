@@ -144,8 +144,8 @@ test('deleting an account requires the exact confirm email and password, then si
 
   await expect(page).toHaveURL(/\/login\?accountDeleted=1/);
 
-  // The signed-out flow clears the cookie itself; separately verify the
-  // stale-JWT guard (decision 6) by hitting the DELETE route directly on a
+  // The signed-out flow clears the cookie itself; separately verify that a
+  // still-present session cookie stops working (decision 6) by hitting the DELETE route directly on a
   // *second* fresh account so the session cookie survives the call, then
   // confirming a protected page still redirects.
 });
@@ -163,7 +163,7 @@ test('a deleted user is redirected even if their session cookie is still present
 
   // Call the API directly instead of through the UI, so the client-side
   // signOutAfterAccountDeletion() (which would clear the cookie itself)
-  // never runs — this isolates the jwt callback's own stale-user check.
+  // never runs — this isolates the session rows being deleted with the user.
   const res = await page.request.delete('/api/settings/account', {
     data: { confirmEmail: email, currentPassword: PASSWORD },
   });

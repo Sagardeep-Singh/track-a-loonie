@@ -41,13 +41,13 @@ npm run db:setup                     # generate + migrate + seed in one step
 - `lib/db/`: Prisma client singleton and db helpers.
 - `prisma/`: schema, migrations, seed data.
 
-**Stack:** Next.js App Router, TypeScript, Prisma + Postgres, NextAuth (credentials + Google, multi-user), Tailwind CSS, Zod, Vitest.
+**Stack:** Next.js App Router, TypeScript, Prisma + Postgres, Better Auth (credentials + Google, multi-user, database sessions), Tailwind CSS, Zod, Vitest.
 
 **Request flow:** route handler → Zod validator → service → Prisma via `lib/db/prisma.ts` singleton. No business logic in handlers.
 
 **Services:** own all business logic and Prisma queries. Return plain objects or throw typed validation errors. Never return raw Prisma models to the client.
 
-**Auth:** NextAuth credentials + Google (Google shown only when `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are set); anyone can sign up, isolation is via `userId` scoping (no roles/tenant system); all routes under `app/(protected)/` require session.
+**Auth:** Better Auth (`lib/auth/auth.ts`) credentials + Google (Google shown only when `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are set); anyone can sign up, isolation is via `userId` scoping (no roles/tenant system); all routes under `app/(protected)/` require session.
 
 ## Conventions
 

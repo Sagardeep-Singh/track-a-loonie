@@ -6,7 +6,7 @@ import { GoogleReauthRequiredError, ServiceValidationError } from '@/lib/service
 
 export const DELETE = async (request: Request): Promise<NextResponse> => {
   // `requireSession` rather than `requireUserId`: account deletion also needs
-  // the token's `reauthenticatedAt` as its live-credential proof.
+  // the session's sign-in time as a Google-only user's live-credential proof.
   const session = await requireSession();
   if (session instanceof NextResponse) {
     return session;
@@ -19,13 +19,9 @@ export const DELETE = async (request: Request): Promise<NextResponse> => {
 
   try {
     // Read from the session, never the request body — a client-supplied
-    // "I reauthenticated" flag would be trivially spoofable; the signed JWT
+    // "I reauthenticated" flag would be trivially spoofable; the session row
     // is not.
-    const result = await deleteUserAccount(
-      session.user.id,
-      parsed.data,
-      session.user.reauthenticatedAt,
-    );
+    const result = await deleteUserAccount(session.user.id, parsed.data, session.user.signedInAt);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof GoogleReauthRequiredError) {

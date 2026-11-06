@@ -50,20 +50,25 @@ enum BudgetMode {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String?
-  /// nullable: users who sign up via Google have no password
-  passwordHash String?
-  /// null = unverified. Google sign-up sets this immediately (Google already
-  /// verified the address); credentials sign-up leaves it null until the
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  /// false = unverified. Google sign-up sets this immediately (Google already
+  /// verified the address); credentials sign-up leaves it false until the
   /// emailed link is clicked. Never gates access — see
   /// lib/services/emailVerification.ts and the 2026-09-17 codebase review's
   /// "Signup has no email verification" finding for the accepted-risk
   /// reasoning behind that choice.
-  emailVerified DateTime?
-  createdAt     DateTime  @default(now())
+  emailVerified Boolean  @default(false)
+  /// Better Auth core field, unused by the app
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
 
+  /// sign-in methods (Better Auth's `account` model): the password lives on
+  /// the `credential` row, see lib/auth/auth.ts
+  authAccounts       AuthAccount[]
+  sessions           Session[]
   accounts           Account[]
   categories         Category[]
   transactions       Transaction[]
@@ -80,6 +85,61 @@ model User {
   savingsGoals           SavingsGoal[]
   emailVerificationToken EmailVerificationToken?
   passwordResetToken     PasswordResetToken?
+}
+
+/// Better Auth's `account` model, renamed so it can't be confused with the
+/// bank/credit `Account` below. One row per sign-in method: `providerId`
+/// "credential" (accountId = userId, `password` = bcrypt hash) or "google"
+/// (accountId = Google's subject id).
+model AuthAccount {
+  id                    String    @id @default(cuid())
+  userId                String
+  accountId             String
+  providerId            String
+  password              String?
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+/// Better Auth database session. Deleting the user cascades here, which is
+/// what signs a deleted account out on every device at once.
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Better Auth's short-lived values (OAuth state). Email verification and
+/// password reset keep their own token tables below.
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@index([identifier])
 }
 
 /// One row per user, replaced (not appended) on every (re)send — sending a
