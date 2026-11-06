@@ -10,8 +10,11 @@ import {
   ACCOUNT_TYPE_GROUPS,
   ACCOUNT_TYPES,
   accountTypesInGroup,
+  balanceFieldLabel,
   defaultOnBudgetFor,
   defaultTracksBalanceFor,
+  isLiabilityAccountType,
+  liabilityAwareBalance,
 } from '@/lib/account-types';
 import { patchJSON, postJSON } from '@/lib/api-client';
 import { todayDateKey } from '@/lib/date';
@@ -54,7 +57,10 @@ export const AccountForm = ({
     const body = {
       name: form.get('name'),
       type: form.get('type'),
-      ...(showStartingBalance && { startingBalance: form.get('startingBalance') }),
+      // a liability is typed as the amount owing and stored negative
+      ...(showStartingBalance && {
+        startingBalance: liabilityAwareBalance(String(form.get('startingBalance') ?? ''), type),
+      }),
       statementDay: type === 'CREDIT_CARD' ? form.get('statementDay') || null : null,
       onBudget,
       tracksBalance,
@@ -98,16 +104,27 @@ export const AccountForm = ({
       {showStartingBalance && (
         <div>
           <Label htmlFor="startingBalance">
-            {!account && tracksBalance ? 'Current balance' : 'Starting balance'}
+            {balanceFieldLabel(type, !account && tracksBalance ? 'Current' : 'Starting')}
           </Label>
           <MoneyInput
             id="startingBalance"
             name="startingBalance"
-            // turning tracking off starts the transaction math from today's balance
+            // turning tracking off starts the transaction math from today's
+            // balance; a liability shows what's owing, not the signed balance
             defaultValue={
-              account?.tracksBalance ? account.balance : (account?.startingBalance ?? '0')
+              account
+                ? liabilityAwareBalance(
+                    account.tracksBalance ? account.balance : account.startingBalance,
+                    account.type,
+                  )
+                : '0'
             }
           />
+          {isLiabilityAccountType(type) && (
+            <p className="text-ink-muted mt-1 text-xs">
+              What you owe, as a positive number. Enter a negative amount for a credit.
+            </p>
+          )}
         </div>
       )}
       {type === 'CREDIT_CARD' && (

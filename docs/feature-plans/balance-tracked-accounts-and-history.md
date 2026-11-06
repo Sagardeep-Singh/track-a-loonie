@@ -69,6 +69,8 @@ Savings, registered (TFSA, RRSP, ...) and investment accounts change value throu
 - `PATCH /api/accounts/[id]` now answers 400 (not 404) with the message when an edit breaks a rule, so the account form can show why.
 - Migration hand-written and checked with `prisma migrate deploy` plus `prisma migrate diff` (no drift) on a local Postgres 16.
 
+- Liability balances (credit card, line of credit) are typed as the amount owing and stored negative, in both the account form and Log balance (`liabilityAwareBalance` in `lib/account-types.ts`). A negative amount owing is a credit. Before this, typing what you owe as a positive starting balance stored it as money held.
+
 ## Test plan
 
 ### Unit (`tests/unit/...`)

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  balanceFieldLabel,
+  liabilityAwareBalance,
   ACCOUNT_TYPE_GROUPS,
   ACCOUNT_TYPE_VALUES,
   ACCOUNT_TYPES,
@@ -57,5 +59,29 @@ describe('account type metadata', () => {
     expect(accountTypeGroup('MYSTERY')).toBe('Banking');
     expect(defaultOnBudgetFor('MYSTERY')).toBe(true);
     expect(accountTypeLabel('INVESTMENT')).toBe('Non-registered investment');
+  });
+});
+
+describe('liabilityAwareBalance', () => {
+  it('turns an amount owing into a negative balance and back for liabilities', () => {
+    expect(liabilityAwareBalance('1200', 'CREDIT_CARD')).toBe('-1200');
+    expect(liabilityAwareBalance('-1200.50', 'LINE_OF_CREDIT')).toBe('1200.50');
+  });
+
+  it('keeps zero, blanks and asset balances as they are', () => {
+    expect(liabilityAwareBalance('0', 'CREDIT_CARD')).toBe('0');
+    expect(liabilityAwareBalance('-0.00', 'CREDIT_CARD')).toBe('0.00');
+    expect(liabilityAwareBalance('abc', 'CREDIT_CARD')).toBe('abc');
+    expect(liabilityAwareBalance('', 'CREDIT_CARD')).toBe('');
+    expect(liabilityAwareBalance('1200', 'TFSA')).toBe('1200');
+    expect(liabilityAwareBalance('-50', 'CHECKING')).toBe('-50');
+  });
+});
+
+describe('balanceFieldLabel', () => {
+  it('asks for the amount owing on liabilities', () => {
+    expect(balanceFieldLabel('CREDIT_CARD', 'Starting')).toBe('Starting amount owing');
+    expect(balanceFieldLabel('LINE_OF_CREDIT', 'New')).toBe('New amount owing');
+    expect(balanceFieldLabel('SAVINGS', 'Current')).toBe('Current balance');
   });
 });

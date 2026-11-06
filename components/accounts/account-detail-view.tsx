@@ -116,7 +116,11 @@ export const AccountDetailView = ({
             className="border-line bg-paper-raised rounded-2xl border p-5.5"
           >
             <h2 className="font-display mb-3 text-[17px] font-semibold">Log a balance</h2>
-            <BalanceUpdateForm accountId={account.id} currentBalance={account.balance} />
+            <BalanceUpdateForm
+              accountId={account.id}
+              accountType={account.type}
+              currentBalance={account.balance}
+            />
           </section>
 
           <section

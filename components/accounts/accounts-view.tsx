@@ -285,6 +285,7 @@ export const AccountsView = ({
         {loggingFor && (
           <BalanceUpdateForm
             accountId={loggingFor.id}
+            accountType={loggingFor.type}
             currentBalance={loggingFor.balance}
             onDone={() => setLoggingFor(null)}
           />

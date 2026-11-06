@@ -6,16 +6,20 @@ import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/field';
 import { MoneyInput } from '@/components/ui/money-input';
+import { balanceFieldLabel, liabilityAwareBalance } from '@/lib/account-types';
 import { postJSON } from '@/lib/api-client';
 import { todayDateKey } from '@/lib/date';
 
 /** Logs a new balance for a balance-tracked account. */
 export const BalanceUpdateForm = ({
   accountId,
+  accountType,
   currentBalance,
   onDone,
 }: {
   accountId: string;
+  /** a liability's balance is typed as the amount owing */
+  accountType: string;
   /** prefills the amount, so a small change is a quick edit */
   currentBalance: string;
   onDone?: () => void;
@@ -33,7 +37,7 @@ export const BalanceUpdateForm = ({
 
     const form = new FormData(event.currentTarget);
     const res = await postJSON(`/api/accounts/${accountId}/balance-updates`, {
-      balance: form.get('balance'),
+      balance: liabilityAwareBalance(String(form.get('balance') ?? ''), accountType),
       date: form.get('date'),
       note: form.get('note') || undefined,
     });
@@ -55,8 +59,13 @@ export const BalanceUpdateForm = ({
     <form key={formKey} onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <Label htmlFor={id('balance')}>New balance</Label>
-          <MoneyInput id={id('balance')} name="balance" defaultValue={currentBalance} required />
+          <Label htmlFor={id('balance')}>{balanceFieldLabel(accountType, 'New')}</Label>
+          <MoneyInput
+            id={id('balance')}
+            name="balance"
+            defaultValue={liabilityAwareBalance(currentBalance, accountType)}
+            required
+          />
         </div>
         <div>
           <Label htmlFor={id('date')}>As of</Label>

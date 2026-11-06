@@ -74,3 +74,24 @@ export const accountTypeGroup = (type: string): AccountTypeGroup =>
  * investment) whose value moves without anything worth logging as a transaction */
 export const defaultTracksBalanceFor = (type: string): boolean =>
   type === 'SAVINGS' || ['Registered', 'Investment'].includes(accountTypeGroup(type));
+
+/**
+ * Converts between a stored signed balance and what the user types into a
+ * balance field, in either direction. Balances are stored signed (a credit
+ * card owing $1,200 is -1200), but people think of a liability as the amount
+ * they owe, so its fields take that as a positive number. A negative amount
+ * owing is a credit, e.g. an overpaid card. Asset balances pass through.
+ */
+export const liabilityAwareBalance = (value: string, type: string): string => {
+  const trimmed = value.trim();
+  if (!isLiabilityAccountType(type) || !Number.isFinite(Number(trimmed)) || trimmed === '') {
+    return value;
+  }
+  // flip the sign as text so "-1200.00" keeps its cents; zero stays unsigned
+  if (Number(trimmed) === 0) return trimmed.replace(/^-/, '');
+  return trimmed.startsWith('-') ? trimmed.slice(1) : `-${trimmed}`;
+};
+
+/** Label for a balance field: liabilities are entered as the amount owing. */
+export const balanceFieldLabel = (type: string, prefix: 'Current' | 'Starting' | 'New'): string =>
+  isLiabilityAccountType(type) ? `${prefix} amount owing` : `${prefix} balance`;

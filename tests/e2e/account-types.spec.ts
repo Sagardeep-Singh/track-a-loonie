@@ -13,7 +13,7 @@ const addAccount = async (
   await dialog.getByLabel('Name').fill(name);
   await dialog.getByLabel('Type').selectOption({ label: type });
   // tracked types (TFSA) ask for the current balance instead
-  await dialog.getByLabel(/(Current|Starting) balance/).fill(startingBalance);
+  await dialog.getByLabel(/(Current|Starting) (balance|amount owing)/).fill(startingBalance);
   await dialog.getByRole('button', { name: 'Add account' }).click();
   await expect(dialog).toBeHidden();
 };
@@ -27,7 +27,8 @@ test('registered and line of credit accounts show under their own groups', async
   await page.goto('/accounts');
 
   await addAccount(page, { name: 'My TFSA', type: 'TFSA', startingBalance: '5000' });
-  await addAccount(page, { name: 'My LOC', type: 'Line of credit', startingBalance: '-1200' });
+  // a liability is entered as the amount owing and stored as a negative balance
+  await addAccount(page, { name: 'My LOC', type: 'Line of credit', startingBalance: '1200' });
 
   const registered = page.getByRole('region', { name: 'Registered' });
   await expect(registered.getByText('My TFSA')).toBeVisible();

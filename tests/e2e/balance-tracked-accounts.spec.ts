@@ -156,3 +156,32 @@ test('turning tracking on is refused while the account has transactions', async 
   await page.getByRole('region', { name: 'Banking' }).getByRole('button', { name: 'Edit' }).click();
   await expect(page.getByRole('dialog').getByLabel('Track by balance updates')).toBeDisabled();
 });
+
+test('a liability is entered as the amount owing and stored negative', async ({ page }) => {
+  await signUp(page);
+  await page.goto('/accounts');
+  await page.getByRole('button', { name: 'Add an account' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Name').fill('Visa');
+  await dialog.getByLabel('Type').selectOption({ label: 'Credit card' });
+  await dialog.getByLabel('Track by balance updates').check();
+  await dialog.getByLabel('Current amount owing').fill('1200');
+  await dialog.getByRole('button', { name: 'Add account' }).click();
+  await expect(dialog).toBeHidden();
+
+  const credit = page.getByRole('region', { name: 'Credit' });
+  await expect(credit.getByText('owing')).toBeVisible();
+
+  await credit.getByRole('button', { name: 'Log balance' }).click();
+  const logDialog = page.getByRole('dialog');
+  // prefilled with what's owing, not the signed balance
+  await expect(logDialog.getByLabel('New amount owing')).toHaveValue('1,200.00');
+  await logDialog.getByLabel('New amount owing').fill('900');
+  await logDialog.getByRole('button', { name: 'Log balance' }).click();
+  await expect(logDialog).toBeHidden();
+
+  const [visa] = (await (await page.request.get('/api/accounts')).json()) as {
+    balance: string;
+  }[];
+  expect(visa!.balance).toBe('-900.00');
+});
