@@ -20,6 +20,7 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
     categoryAssignments,
     budgetSettings,
     savingsGoals,
+    balanceUpdates,
   ] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, name: true } }),
     prisma.account.findMany({
@@ -31,6 +32,7 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         startingBalance: true,
         statementDay: true,
         onBudget: true,
+        tracksBalance: true,
         createdAt: true,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -130,6 +132,11 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     }),
+    prisma.accountBalanceUpdate.findMany({
+      where: { userId },
+      select: { id: true, accountId: true, balance: true, date: true, note: true, createdAt: true },
+      orderBy: [{ date: 'asc' }, { id: 'asc' }],
+    }),
   ]);
 
   return {
@@ -144,6 +151,7 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         startingBalance: decimalToString(a.startingBalance),
         statementDay: a.statementDay,
         onBudget: a.onBudget,
+        tracksBalance: a.tracksBalance,
         createdAt: a.createdAt,
       })),
       categories: categories.map((c) => ({
@@ -232,6 +240,14 @@ export const exportUserData = async (userId: string): Promise<UserDataFile> => {
         archivedAt: g.archivedAt,
         createdAt: g.createdAt,
       })),
+      balanceUpdates: balanceUpdates.map((u) => ({
+        id: u.id,
+        accountId: u.accountId,
+        balance: decimalToString(u.balance),
+        date: u.date,
+        note: u.note,
+        createdAt: u.createdAt,
+      })),
     },
   };
 };
@@ -285,6 +301,7 @@ export type ImportUserDataResult = {
     reimbursementLinks: number;
     categoryAssignments: number;
     savingsGoals: number;
+    balanceUpdates: number;
   };
 };
 
@@ -329,7 +346,8 @@ export const importUserData = async (
             type: a.type,
             startingBalance: a.startingBalance,
             statementDay: a.statementDay,
-            onBudget: a.onBudget ?? defaultOnBudgetFor(a.type),
+            onBudget: a.tracksBalance ? false : (a.onBudget ?? defaultOnBudgetFor(a.type)),
+            tracksBalance: a.tracksBalance ?? false,
             createdAt: a.createdAt,
           })),
         });
@@ -465,6 +483,20 @@ export const importUserData = async (
         });
       }
 
+      for (const rows of chunk(data.balanceUpdates ?? [], CREATE_MANY_CHUNK_SIZE)) {
+        await tx.accountBalanceUpdate.createMany({
+          data: rows.map((u) => ({
+            id: randomUUID(),
+            userId,
+            accountId: accountIds.get(u.accountId)!,
+            balance: u.balance,
+            date: u.date,
+            note: u.note,
+            createdAt: u.createdAt,
+          })),
+        });
+      }
+
       // a v1 file says nothing about the budgeting mode, so the current one
       // stays; a v2 file carries it (null = never changed, i.e. LIMITS)
       if (data.budgetSettings !== undefined) {
@@ -488,6 +520,7 @@ export const importUserData = async (
       reimbursementLinks: data.reimbursementLinks.length,
       categoryAssignments: data.categoryAssignments?.length ?? 0,
       savingsGoals: data.savingsGoals?.length ?? 0,
+      balanceUpdates: data.balanceUpdates?.length ?? 0,
     },
   };
 };

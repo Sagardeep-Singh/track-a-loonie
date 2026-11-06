@@ -53,7 +53,8 @@ const TransactionsPage = async ({
       <TransactionsView
         initialPage={initialPage}
         initialRequestKey={transactionsPageSearchParams(scope).toString()}
-        accounts={accounts}
+        // balance-tracked accounts never hold transactions
+        accounts={accounts.filter((a) => !a.tracksBalance)}
         categories={categories}
       />
     </div>

@@ -30,7 +30,8 @@ test('zero-based budgeting: enable, assign, cover an overspend, switch back', as
     })
   ).json();
   await page.request.post('/api/accounts', {
-    data: { name: 'Savings', type: 'SAVINGS', startingBalance: 5000 },
+    // a transaction-based savings account: balance-tracked ones never show in this picker
+    data: { name: 'Savings', type: 'SAVINGS', startingBalance: 5000, tracksBalance: false },
   });
   const groceries = await (
     await page.request.post('/api/categories', { data: { name: 'Groceries' } })

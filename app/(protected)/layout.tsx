@@ -38,7 +38,11 @@ const ProtectedLayout = async ({
       </main>
       <BottomNav counts={counts} />
       <Suspense fallback={null}>
-        <AddTransactionOverlay accounts={accounts} categories={categories} />
+        <AddTransactionOverlay
+          // balance-tracked accounts don't take transactions
+          accounts={accounts.filter((a) => !a.tracksBalance)}
+          categories={categories}
+        />
       </Suspense>
     </div>
   );

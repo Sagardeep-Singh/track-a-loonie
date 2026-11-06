@@ -48,7 +48,8 @@ const SettingsPage = async (): Promise<React.ReactElement> => {
         aiSettings={aiSettings}
         aiModels={aiModels}
         budgetSettings={budgetSettings}
-        accounts={accounts}
+        // balance-tracked accounts are always off-budget
+        accounts={accounts.filter((a) => !a.tracksBalance)}
       />
       <SourceLink className="mt-12 text-center" />
     </div>

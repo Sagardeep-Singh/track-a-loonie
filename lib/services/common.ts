@@ -1,5 +1,9 @@
 import type { FrontendImportBatch } from '@/lib/services/importBatches';
 
+/** Why a transaction or import was refused on a balance-tracked account. */
+export const TRACKED_ACCOUNT_MESSAGE =
+  'This account is tracked by balance updates and doesn’t take transactions. Log a new balance instead.';
+
 export class ServiceValidationError extends Error {
   constructor(message: string) {
     super(message);

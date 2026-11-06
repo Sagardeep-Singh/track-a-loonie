@@ -71,6 +71,7 @@ model User {
   categoryRules      CategoryRule[]
   importBatches      ImportBatch[]
   reimbursementLinks ReimbursementLink[]
+  balanceUpdates     AccountBalanceUpdate[]
 
   pushSubscriptions      PushSubscription[]
   notificationPreference NotificationPreference?
@@ -124,12 +125,40 @@ model Account {
   /// spending account in a goal's category is a contribution. Defaults to
   /// true; createAccount turns it off for savings and registered types.
   onBudget        Boolean     @default(true)
+  /// tracked by logging balance updates instead of transactions (savings,
+  /// registered and investment accounts). Its balance is the latest
+  /// AccountBalanceUpdate, it never holds transactions and it's always
+  /// off-budget. createAccount turns it on for savings, registered and
+  /// investment types unless the user says otherwise.
+  tracksBalance   Boolean     @default(false)
   createdAt       DateTime    @default(now())
 
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions  Transaction[]
-  importBatches ImportBatch[]
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  importBatches  ImportBatch[]
+  balanceUpdates AccountBalanceUpdate[]
 
+  @@index([userId])
+}
+
+/// one logged balance of a balance-tracked account (Account.tracksBalance).
+/// The account's balance is the update with the latest `date` (ties: latest
+/// `createdAt`); the history chart reads them as month-end balances.
+model AccountBalanceUpdate {
+  id        String   @id @default(cuid())
+  userId    String
+  accountId String
+  balance   Decimal  @db.Decimal(12, 2)
+  /// calendar date the balance was observed, stored as UTC midnight like
+  /// Transaction.date; may be backdated to record history
+  date      DateTime
+  note      String?
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, date])
   @@index([userId])
 }
 

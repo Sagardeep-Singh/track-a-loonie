@@ -1,6 +1,10 @@
 import { fromDateKey, toDateKey } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
-import { DuplicateFilenameError, ServiceValidationError } from '@/lib/services/common';
+import {
+  DuplicateFilenameError,
+  ServiceValidationError,
+  TRACKED_ACCOUNT_MESSAGE,
+} from '@/lib/services/common';
 import { compileRuleMatcher } from '@/lib/services/categorize';
 import {
   findActiveBatchByFilename,
@@ -175,10 +179,13 @@ export const commitImport = async (
 ): Promise<{ batchId: string | null; imported: number; skippedDuplicates: number }> => {
   const account = await prisma.account.findFirst({
     where: { id: input.accountId, userId },
-    select: { id: true },
+    select: { id: true, tracksBalance: true },
   });
   if (!account) {
     throw new ServiceValidationError('Account not found');
+  }
+  if (account.tracksBalance) {
+    throw new ServiceValidationError(TRACKED_ACCOUNT_MESSAGE);
   }
 
   // Ordering is normative: the filename gate runs *before* row-level dedupe and

@@ -12,7 +12,8 @@ const addAccount = async (
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name').fill(name);
   await dialog.getByLabel('Type').selectOption({ label: type });
-  await dialog.getByLabel('Starting balance').fill(startingBalance);
+  // tracked types (TFSA) ask for the current balance instead
+  await dialog.getByLabel(/(Current|Starting) balance/).fill(startingBalance);
   await dialog.getByRole('button', { name: 'Add account' }).click();
   await expect(dialog).toBeHidden();
 };

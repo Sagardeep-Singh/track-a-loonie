@@ -1,7 +1,11 @@
 import { isLiabilityAccountType } from '@/lib/account-types';
 import { monthOfDate, monthsBetween } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
-import { ReimbursementConflictError, ServiceValidationError } from '@/lib/services/common';
+import {
+  ReimbursementConflictError,
+  ServiceValidationError,
+  TRACKED_ACCOUNT_MESSAGE,
+} from '@/lib/services/common';
 import {
   assertNoActiveLinks,
   deriveReimbursementStatus,
@@ -176,6 +180,9 @@ const assertOwnedRefs = async (
   const account = await prisma.account.findFirst({ where: { id: accountId, userId } });
   if (!account) {
     throw new ServiceValidationError('Account not found');
+  }
+  if (account.tracksBalance) {
+    throw new ServiceValidationError(TRACKED_ACCOUNT_MESSAGE);
   }
   if (categoryId) {
     const category = await prisma.category.findFirst({ where: { id: categoryId, userId } });

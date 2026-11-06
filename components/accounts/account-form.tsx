@@ -11,8 +11,10 @@ import {
   ACCOUNT_TYPES,
   accountTypesInGroup,
   defaultOnBudgetFor,
+  defaultTracksBalanceFor,
 } from '@/lib/account-types';
 import { patchJSON, postJSON } from '@/lib/api-client';
+import { todayDateKey } from '@/lib/date';
 import type { FrontendAccount } from '@/lib/services/accounts';
 
 export const AccountForm = ({
@@ -32,7 +34,16 @@ export const AccountForm = ({
   // a new account follows its type's default (savings and investments
   // off-budget) until the user ticks the box themselves
   const [onBudgetChoice, setOnBudgetChoice] = useState<boolean | null>(account?.onBudget ?? null);
-  const onBudget = onBudgetChoice ?? defaultOnBudgetFor(type);
+  // same idea for balance tracking: savings, registered and investment
+  // accounts default to it
+  const [tracksChoice, setTracksChoice] = useState<boolean | null>(account?.tracksBalance ?? null);
+  const tracksBalance = tracksChoice ?? defaultTracksBalanceFor(type);
+  // a tracked balance moves without transactions, so it's never on-budget
+  const onBudget = !tracksBalance && (onBudgetChoice ?? defaultOnBudgetFor(type));
+  // an account with transactions has to lose them before it can be tracked
+  const canTrack = account?.tracksBalance || !account?.transactionCount;
+  // while tracked, an existing account's balance comes from its updates
+  const showStartingBalance = !(account?.tracksBalance && tracksBalance);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -43,9 +54,11 @@ export const AccountForm = ({
     const body = {
       name: form.get('name'),
       type: form.get('type'),
-      startingBalance: form.get('startingBalance'),
+      ...(showStartingBalance && { startingBalance: form.get('startingBalance') }),
       statementDay: type === 'CREDIT_CARD' ? form.get('statementDay') || null : null,
       onBudget,
+      tracksBalance,
+      startingBalanceDate: todayDateKey(),
     };
 
     const res = account
@@ -54,7 +67,7 @@ export const AccountForm = ({
 
     setPending(false);
     if (!res.ok) {
-      setError('Could not save this account. Check the fields and try again.');
+      setError(res.error ?? 'Could not save this account. Check the fields and try again.');
       return;
     }
 
@@ -82,14 +95,21 @@ export const AccountForm = ({
           ))}
         </Select>
       </div>
-      <div>
-        <Label htmlFor="startingBalance">Starting balance</Label>
-        <MoneyInput
-          id="startingBalance"
-          name="startingBalance"
-          defaultValue={account?.startingBalance ?? '0'}
-        />
-      </div>
+      {showStartingBalance && (
+        <div>
+          <Label htmlFor="startingBalance">
+            {!account && tracksBalance ? 'Current balance' : 'Starting balance'}
+          </Label>
+          <MoneyInput
+            id="startingBalance"
+            name="startingBalance"
+            // turning tracking off starts the transaction math from today's balance
+            defaultValue={
+              account?.tracksBalance ? account.balance : (account?.startingBalance ?? '0')
+            }
+          />
+        </div>
+      )}
       {type === 'CREDIT_CARD' && (
         <div>
           <Label htmlFor="statementDay">Statement closes on (day of month)</Label>
@@ -111,20 +131,40 @@ export const AccountForm = ({
       <label className="flex items-start gap-3 text-sm">
         <input
           type="checkbox"
-          name="onBudget"
+          name="tracksBalance"
           className="accent-iris mt-0.5 size-4"
-          checked={onBudget}
-          onChange={(e) => setOnBudgetChoice(e.target.checked)}
+          checked={tracksBalance}
+          disabled={!canTrack}
+          onChange={(e) => setTracksChoice(e.target.checked)}
         />
         <span>
-          {zeroBased ? 'On-budget' : 'Spending account'}
+          Track by balance updates
           <span className="text-ink-muted mt-0.5 block text-xs">
-            {zeroBased
-              ? 'Its balance counts toward Ready to Assign. Turn off for long-term savings you don’t want to budget.'
-              : 'Money you spend from day to day. Transfers out of it tagged with a savings goal’s category count toward the goal. Turn off for savings accounts.'}
+            {canTrack
+              ? 'For savings, registered and investment accounts. Log the balance whenever you check it instead of logging transactions.'
+              : 'Move or delete this account’s transactions first. A balance-tracked account doesn’t hold transactions.'}
           </span>
         </span>
       </label>
+      {!tracksBalance && (
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            name="onBudget"
+            className="accent-iris mt-0.5 size-4"
+            checked={onBudget}
+            onChange={(e) => setOnBudgetChoice(e.target.checked)}
+          />
+          <span>
+            {zeroBased ? 'On-budget' : 'Spending account'}
+            <span className="text-ink-muted mt-0.5 block text-xs">
+              {zeroBased
+                ? 'Its balance counts toward Ready to Assign. Turn off for long-term savings you don’t want to budget.'
+                : 'Money you spend from day to day. Transfers out of it tagged with a savings goal’s category count toward the goal. Turn off for savings accounts.'}
+            </span>
+          </span>
+        </label>
+      )}
       {error && (
         <p className="bg-rose-soft text-rose rounded-lg px-3 py-2 text-sm" role="alert">
           {error}
