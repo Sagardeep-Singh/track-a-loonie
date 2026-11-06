@@ -23,7 +23,9 @@ export const PATCH = async (request: Request, { params }: RouteParams): Promise<
     return NextResponse.json(account);
   } catch (error) {
     if (error instanceof ServiceValidationError) {
-      return NextResponse.json({ error: error.message }, { status: 404 });
+      // a rule the edit broke (e.g. tracking an account that has transactions) is a 400
+      const status = error.message === 'Account not found' ? 404 : 400;
+      return NextResponse.json({ error: error.message }, { status });
     }
     throw error;
   }

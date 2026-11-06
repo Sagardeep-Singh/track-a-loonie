@@ -439,3 +439,45 @@ describe('userDataFileSchema savings goals', () => {
     ).toBe(false);
   });
 });
+
+describe('userDataFileSchema balance-tracked accounts', () => {
+  const TFSA = { ...ACCOUNT, id: 'acc-tfsa', name: 'TFSA', type: 'TFSA', tracksBalance: true };
+  const UPDATE = {
+    id: 'bu-1',
+    accountId: 'acc-tfsa',
+    balance: '5000.00',
+    date: '2026-10-01T00:00:00.000Z',
+    note: null,
+    createdAt: '2026-10-01T00:00:00.000Z',
+  };
+  const withTracked = (
+    updates: Record<string, unknown>[],
+  ): Record<string, unknown> & { data: Record<string, unknown[]> } => {
+    const file = validFile() as Record<string, unknown> & { data: Record<string, unknown[]> };
+    file.data.accounts.push(TFSA);
+    file.data.balanceUpdates = updates;
+    return file;
+  };
+
+  it('accepts balance updates on a tracked account and still accepts a v3 file', () => {
+    expect(userDataFileSchema.safeParse(withTracked([UPDATE])).success).toBe(true);
+    const v3 = validFile() as { formatVersion: number };
+    v3.formatVersion = 3;
+    expect(userDataFileSchema.safeParse(v3).success).toBe(true);
+  });
+
+  it('rejects an update on an unknown or untracked account', () => {
+    expect(
+      userDataFileSchema.safeParse(withTracked([{ ...UPDATE, accountId: 'nope' }])).success,
+    ).toBe(false);
+    expect(
+      userDataFileSchema.safeParse(withTracked([{ ...UPDATE, accountId: 'acc-1' }])).success,
+    ).toBe(false);
+  });
+
+  it('rejects a transaction on a tracked account', () => {
+    const file = withTracked([UPDATE]);
+    (file.data.transactions[1] as { accountId: string }).accountId = 'acc-tfsa';
+    expect(userDataFileSchema.safeParse(file).success).toBe(false);
+  });
+});

@@ -20,6 +20,17 @@ const { createAccount, deleteAccount, listAccounts, updateAccount } =
 const { ReimbursementConflictError, ServiceValidationError } =
   await import('@/lib/services/common');
 
+/** what updateAccount's findFirst returns: the row plus its counts and latest update */
+const existingAccount = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id: 'acc-1',
+  type: 'CHECKING',
+  startingBalance: 0,
+  tracksBalance: false,
+  _count: { transactions: 0, balanceUpdates: 0 },
+  balanceUpdates: [],
+  ...overrides,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.reimbursementLink.count.mockResolvedValue(0);
@@ -52,6 +63,7 @@ describe('listAccounts', () => {
         startingBalance: 100,
         createdAt: '2026-01-01T00:00:00.000Z',
         balance: '130.00',
+        balanceUpdatedAt: null,
         transactionCount: 2,
         lastImportAt: null,
       },
@@ -102,6 +114,7 @@ describe('createAccount', () => {
       type: 'SAVINGS',
       startingBalance: 0,
       onBudget: true,
+      tracksBalance: false,
     });
 
     const flags = prismaMock.account.create.mock.calls.map(
@@ -131,6 +144,7 @@ describe('createAccount', () => {
       type: 'TFSA',
       startingBalance: 0,
       onBudget: true,
+      tracksBalance: false,
     });
 
     const flags = prismaMock.account.create.mock.calls.map(
@@ -228,7 +242,7 @@ describe('updateAccount statementDay', () => {
   });
 
   it('clears statementDay when the type changes away from CREDIT_CARD', async () => {
-    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'CREDIT_CARD' });
+    prismaMock.account.findFirst.mockResolvedValue(existingAccount({ type: 'CREDIT_CARD' }));
     prismaMock.account.update.mockResolvedValue({
       id: 'acc-1',
       name: 'Old Card',
@@ -248,7 +262,7 @@ describe('updateAccount statementDay', () => {
   });
 
   it('persists statementDay when the account is (or becomes) a CREDIT_CARD', async () => {
-    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', type: 'CREDIT_CARD' });
+    prismaMock.account.findFirst.mockResolvedValue(existingAccount({ type: 'CREDIT_CARD' }));
     prismaMock.account.update.mockResolvedValue({
       id: 'acc-1',
       name: 'Visa',
@@ -266,5 +280,187 @@ describe('updateAccount statementDay', () => {
       expect.objectContaining({ data: expect.objectContaining({ statementDay: 20 }) }),
     );
     expect(result.statementDay).toBe(20);
+  });
+});
+
+describe('balance-tracked accounts', () => {
+  const createdRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'acc-9',
+    name: 'TFSA',
+    type: 'TFSA',
+    startingBalance: 5000,
+    statementDay: null,
+    onBudget: false,
+    tracksBalance: true,
+    createdAt: new Date('2026-01-01'),
+    transactions: [],
+    importBatches: [],
+    balanceUpdates: [],
+    ...overrides,
+  });
+
+  it('reports the latest balance update as the balance of a tracked account', async () => {
+    prismaMock.account.findMany.mockResolvedValue([
+      createdRow({
+        balanceUpdates: [{ balance: 6250.5, date: new Date('2026-10-01T00:00:00.000Z') }],
+      }),
+    ]);
+
+    const [account] = await listAccounts('user-1');
+
+    expect(account).toMatchObject({
+      balance: '6250.50',
+      tracksBalance: true,
+      balanceUpdatedAt: '2026-10-01T00:00:00.000Z',
+      transactionCount: 0,
+    });
+  });
+
+  it('falls back to the starting balance when a tracked account has no updates', async () => {
+    prismaMock.account.findMany.mockResolvedValue([createdRow()]);
+
+    const [account] = await listAccounts('user-1');
+
+    expect(account).toMatchObject({ balance: '5000.00', balanceUpdatedAt: null });
+  });
+
+  it('ignores balance updates on an untracked account', async () => {
+    prismaMock.account.findMany.mockResolvedValue([
+      createdRow({
+        tracksBalance: false,
+        balanceUpdates: [{ balance: 1, date: new Date('2026-10-01') }],
+        transactions: [{ amount: 100, type: 'INCOME' }],
+      }),
+    ]);
+
+    const [account] = await listAccounts('user-1');
+
+    expect(account).toMatchObject({ balance: '5100.00', balanceUpdatedAt: null });
+  });
+
+  it('defaults tracking on for savings, registered and investment types only', async () => {
+    prismaMock.account.create.mockResolvedValue(createdRow());
+
+    for (const type of ['SAVINGS', 'TFSA', 'RRSP', 'INVESTMENT', 'CHECKING', 'CREDIT_CARD']) {
+      await createAccount('user-1', { name: type, type: type as 'TFSA', startingBalance: 0 });
+    }
+
+    const tracked = prismaMock.account.create.mock.calls.map(
+      (call: unknown[]) => (call[0] as { data: { tracksBalance: boolean } }).data.tracksBalance,
+    );
+    expect(tracked).toEqual([true, true, true, true, false, false]);
+  });
+
+  it('forces a tracked account off-budget and logs its starting balance as the first update', async () => {
+    prismaMock.account.create.mockResolvedValue(createdRow());
+    const date = new Date('2026-11-05T00:00:00.000Z');
+
+    await createAccount('user-1', {
+      name: 'Checking by balance',
+      type: 'CHECKING',
+      startingBalance: 5000,
+      onBudget: true,
+      tracksBalance: true,
+      startingBalanceDate: date,
+    });
+
+    const { data } = prismaMock.account.create.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data.onBudget).toBe(false);
+    expect(data.balanceUpdates).toEqual({
+      create: { userId: 'user-1', balance: 5000, date },
+    });
+  });
+
+  it('does not log a first update for a transaction account', async () => {
+    prismaMock.account.create.mockResolvedValue(createdRow({ tracksBalance: false }));
+
+    await createAccount('user-1', { name: 'Chq', type: 'CHECKING', startingBalance: 10 });
+
+    const { data } = prismaMock.account.create.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data.balanceUpdates).toBeUndefined();
+  });
+
+  it('refuses to start tracking an account that has transactions', async () => {
+    prismaMock.account.findFirst.mockResolvedValue(
+      existingAccount({ _count: { transactions: 3, balanceUpdates: 0 } }),
+    );
+
+    await expect(updateAccount('user-1', 'acc-1', { tracksBalance: true })).rejects.toThrow(
+      /transactions before tracking/,
+    );
+    expect(prismaMock.account.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to put a tracked account on-budget', async () => {
+    prismaMock.account.findFirst.mockResolvedValue(existingAccount({ tracksBalance: true }));
+
+    await expect(updateAccount('user-1', 'acc-1', { onBudget: true })).rejects.toThrow(
+      /always off-budget/,
+    );
+  });
+
+  it('logs the current balance as the first update when tracking starts', async () => {
+    prismaMock.account.findFirst.mockResolvedValue(existingAccount({ startingBalance: 1200 }));
+    prismaMock.account.update.mockResolvedValue(createdRow());
+    const date = new Date('2026-11-05T00:00:00.000Z');
+
+    await updateAccount('user-1', 'acc-1', { tracksBalance: true, startingBalanceDate: date });
+
+    const { data } = prismaMock.account.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).toMatchObject({ tracksBalance: true, onBudget: false });
+    expect(data).not.toHaveProperty('startingBalanceDate');
+    expect(data.balanceUpdates).toEqual({ create: { userId: 'user-1', balance: 1200, date } });
+  });
+
+  it('keeps the old updates instead of logging another when tracking is re-enabled', async () => {
+    prismaMock.account.findFirst.mockResolvedValue(
+      existingAccount({ _count: { transactions: 0, balanceUpdates: 2 } }),
+    );
+    prismaMock.account.update.mockResolvedValue(createdRow());
+
+    await updateAccount('user-1', 'acc-1', { tracksBalance: true });
+
+    const { data } = prismaMock.account.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data.balanceUpdates).toBeUndefined();
+  });
+
+  it('copies the tracked balance into the starting balance when tracking stops', async () => {
+    prismaMock.account.findFirst.mockResolvedValue(
+      existingAccount({
+        tracksBalance: true,
+        balanceUpdates: [{ balance: 7300, date: new Date('2026-10-01') }],
+      }),
+    );
+    prismaMock.account.update.mockResolvedValue(createdRow({ tracksBalance: false }));
+
+    await updateAccount('user-1', 'acc-1', { tracksBalance: false });
+
+    expect(prismaMock.account.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ startingBalance: 7300 }) }),
+    );
+  });
+
+  it('uses an explicit starting balance over the tracked one when tracking stops', async () => {
+    prismaMock.account.findFirst.mockResolvedValue(
+      existingAccount({
+        tracksBalance: true,
+        balanceUpdates: [{ balance: 7300, date: new Date('2026-10-01') }],
+      }),
+    );
+    prismaMock.account.update.mockResolvedValue(createdRow({ tracksBalance: false }));
+
+    await updateAccount('user-1', 'acc-1', { tracksBalance: false, startingBalance: 7000 });
+
+    expect(prismaMock.account.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ startingBalance: 7000 }) }),
+    );
   });
 });

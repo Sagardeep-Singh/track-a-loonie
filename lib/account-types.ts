@@ -68,3 +68,9 @@ export const accountTypesInGroup = (group: AccountTypeGroup): AccountTypeValue[]
 
 export const accountTypeGroup = (type: string): AccountTypeGroup =>
   metaFor(type)?.group ?? 'Banking';
+
+/** whether a new account is tracked by balance updates instead of transactions
+ * unless the user says otherwise: the long-term money (savings, registered,
+ * investment) whose value moves without anything worth logging as a transaction */
+export const defaultTracksBalanceFor = (type: string): boolean =>
+  type === 'SAVINGS' || ['Registered', 'Investment'].includes(accountTypeGroup(type));

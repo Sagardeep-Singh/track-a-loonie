@@ -914,3 +914,38 @@ describe('transaction spreading', () => {
     ).rejects.toBeInstanceOf(ServiceValidationError);
   });
 });
+
+describe('balance-tracked accounts', () => {
+  it('refuses to create a transaction on a balance-tracked account', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({
+      id: 'acc-1',
+      type: 'TFSA',
+      tracksBalance: true,
+    });
+
+    await expect(
+      createTransaction('user-1', {
+        accountId: 'acc-1',
+        amount: 100,
+        type: 'INCOME',
+        date: new Date('2026-03-16'),
+        isPayment: false,
+        isTransfer: false,
+        isReimbursable: false,
+      }),
+    ).rejects.toThrow(/tracked by balance updates/);
+    expect(prismaMock.transaction.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses to move a transaction onto a balance-tracked account', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({ ...baseExisting, isPayment: false });
+    prismaMock.account.findFirst.mockImplementation(({ where }: { where: { id: string } }) =>
+      Promise.resolve({ id: where.id, type: 'TFSA', tracksBalance: where.id === 'acc-2' }),
+    );
+
+    await expect(updateTransaction('user-1', 'tx-1', { accountId: 'acc-2' })).rejects.toThrow(
+      ServiceValidationError,
+    );
+    expect(prismaMock.transaction.update).not.toHaveBeenCalled();
+  });
+});

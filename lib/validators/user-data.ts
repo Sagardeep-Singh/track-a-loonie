@@ -2,10 +2,11 @@ import { z } from 'zod';
 import { ACCOUNT_TYPE_VALUES } from '@/lib/account-types';
 import { SPREAD_MAX_MONTHS, SPREAD_MIN_MONTHS } from '@/lib/spread';
 
-export const USER_DATA_FORMAT_VERSION = 3;
-/** v1 predates zero-based budgeting and v2 predates savings goals; their
- * files still import, with the newer fields falling back to their defaults. */
-const SUPPORTED_FORMAT_VERSIONS = [1, 2, USER_DATA_FORMAT_VERSION];
+export const USER_DATA_FORMAT_VERSION = 4;
+/** v1 predates zero-based budgeting, v2 predates savings goals and v3
+ * predates balance-tracked accounts; their files still import, with the
+ * newer fields falling back to their defaults. */
+const SUPPORTED_FORMAT_VERSIONS = [1, 2, 3, USER_DATA_FORMAT_VERSION];
 /** Enforced by the route before this schema even runs — see the byte-length
  * re-check in `app/api/settings/import/route.ts`. Exported so the client's
  * size precheck and error copy can derive from the same number. */
@@ -31,6 +32,17 @@ const accountSchema = z.strictObject({
   statementDay: z.number().int().min(1).max(28).nullable(),
   /** v2+; absent in v1 files, where import derives it from `type` */
   onBudget: z.boolean().optional(),
+  /** v4+; absent in older files, where every account was transaction-based */
+  tracksBalance: z.boolean().optional(),
+  createdAt: z.coerce.date(),
+});
+
+const balanceUpdateSchema = z.strictObject({
+  id: z.string().min(1),
+  accountId: z.string().min(1),
+  balance: signedDecimal,
+  date: z.coerce.date(),
+  note: z.string().nullable(),
   createdAt: z.coerce.date(),
 });
 
@@ -165,6 +177,8 @@ const dataSchema = z.strictObject({
   budgetSettings: budgetSettingsSchema.nullable().optional(),
   /** v3+; absent in v1 and v2 files */
   savingsGoals: z.array(savingsGoalSchema).optional(),
+  /** v4+; absent in v1-v3 files */
+  balanceUpdates: z.array(balanceUpdateSchema).optional(),
 });
 
 const findDuplicateKey = (keys: string[]): string | null => {
@@ -191,6 +205,7 @@ export const userDataFileSchema = z
     const { data } = file;
     const categoryAssignments = data.categoryAssignments ?? [];
     const savingsGoals = data.savingsGoals ?? [];
+    const balanceUpdates = data.balanceUpdates ?? [];
     const totalRecords =
       data.accounts.length +
       data.categories.length +
@@ -200,7 +215,8 @@ export const userDataFileSchema = z
       data.categoryRules.length +
       data.reimbursementLinks.length +
       categoryAssignments.length +
-      savingsGoals.length;
+      savingsGoals.length +
+      balanceUpdates.length;
     if (totalRecords > MAX_IMPORT_RECORDS) {
       ctx.addIssue({
         code: 'custom',
@@ -224,6 +240,7 @@ export const userDataFileSchema = z
       ['reimbursementLinks', data.reimbursementLinks],
       ['categoryAssignments', categoryAssignments],
       ['savingsGoals', savingsGoals],
+      ['balanceUpdates', balanceUpdates],
     ];
     for (const [path, rows] of idDuplicateChecks) {
       const duplicate = findDuplicateKey(rows.map((r) => r.id));
@@ -260,10 +277,30 @@ export const userDataFileSchema = z
     }
     const transferMatchGroups = new Map<string, number>();
 
+    const trackedAccountIds = new Set(
+      data.accounts.filter((a) => a.tracksBalance).map((a) => a.id),
+    );
+    balanceUpdates.forEach((update, i) => {
+      if (!trackedAccountIds.has(update.accountId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['data', 'balanceUpdates', i, 'accountId'],
+          message: 'References an account not tracked by balance in this file.',
+        });
+      }
+    });
+
     data.transactions.forEach((t, i) => {
       const path = (field: string): (string | number)[] => ['data', 'transactions', i, field];
       if (!accountIds.has(t.accountId)) {
         ctx.addIssue({ code: 'custom', path: path('accountId'), message: 'Unknown account.' });
+      }
+      if (trackedAccountIds.has(t.accountId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: path('accountId'),
+          message: 'A balance-tracked account cannot hold transactions.',
+        });
       }
       if (t.categoryId !== null && !categoryIds.has(t.categoryId)) {
         ctx.addIssue({ code: 'custom', path: path('categoryId'), message: 'Unknown category.' });

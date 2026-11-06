@@ -228,6 +228,15 @@ describe('previewImport', () => {
 });
 
 describe('commitImport', () => {
+  it('rejects importing into a balance-tracked account', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1', tracksBalance: true });
+
+    await expect(
+      commit({ accountId: 'acc-1', filename: 'march.csv', rows: [commitRow()] }),
+    ).rejects.toThrow(/tracked by balance updates/);
+    expect(prismaMock.transaction.createMany).not.toHaveBeenCalled();
+  });
+
   it('rejects when the account is not owned by the user', async () => {
     prismaMock.account.findFirst.mockResolvedValue(null);
 

@@ -22,7 +22,11 @@ const ImportPage = async (): Promise<React.ReactElement> => {
           History
         </Link>
       </div>
-      <ImportView accounts={accounts} categories={categories} />
+      <ImportView
+        // balance-tracked accounts don't take transactions
+        accounts={accounts.filter((a) => !a.tracksBalance)}
+        categories={categories}
+      />
     </div>
   );
 };

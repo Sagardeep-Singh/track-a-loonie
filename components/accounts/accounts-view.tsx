@@ -1,11 +1,16 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChartLine, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { AccountForm } from '@/components/accounts/account-form';
+import { BalanceChange } from '@/components/accounts/balance-change';
+import { BalanceLineChart } from '@/components/accounts/balance-line-chart';
+import { BalanceUpdateForm } from '@/components/accounts/balance-update-form';
+import { HistoryRangePills } from '@/components/accounts/history-range-pills';
 import { ReimbursementSummaryCard } from '@/components/accounts/reimbursement-summary-card';
 import { deleteJSON } from '@/lib/api-client';
 import {
@@ -16,6 +21,7 @@ import {
 } from '@/lib/account-types';
 import { formatDate, ordinal } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import type { NetWorthHistory } from '@/lib/services/accountBalances';
 import type { FrontendAccount } from '@/lib/services/accounts';
 import type { FrontendReimbursementPendingSummary } from '@/lib/services/reimbursements';
 
@@ -25,10 +31,12 @@ const money = (value: number): string =>
 export const AccountsView = ({
   initialAccounts,
   pendingReimbursement,
+  netWorthHistory,
   zeroBased = false,
 }: {
   initialAccounts: FrontendAccount[];
   pendingReimbursement: FrontendReimbursementPendingSummary;
+  netWorthHistory: NetWorthHistory;
   zeroBased?: boolean;
 }): React.ReactElement => {
   const router = useRouter();
@@ -37,6 +45,7 @@ export const AccountsView = ({
   const [editing, setEditing] = useState<FrontendAccount | undefined>(undefined);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+  const [loggingFor, setLoggingFor] = useState<FrontendAccount | null>(null);
 
   const openCreate = (): void => {
     setEditing(undefined);
@@ -83,7 +92,12 @@ export const AccountsView = ({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="font-display text-[17px] font-semibold">{account.name}</div>
+            <Link
+              href={`/accounts/${account.id}`}
+              className="font-display text-[17px] font-semibold hover:underline"
+            >
+              {account.name}
+            </Link>
             <div className="text-ink-muted mt-0.5 text-[12.5px]">
               {accountTypeLabel(account.type)}
             </div>
@@ -125,15 +139,42 @@ export const AccountsView = ({
 
         <div className="text-ink-muted mt-3 text-[11.5px]">
           {zeroBased && !account.onBudget ? 'Off-budget · ' : ''}
-          {isCreditCard && account.statementDay
-            ? `Statement closes the ${ordinal(account.statementDay)} · `
-            : ''}
-          {account.transactionCount} transaction{account.transactionCount === 1 ? '' : 's'}
-          {!isCreditCard &&
-            (account.lastImportAt ? ` · last import ${formatDate(account.lastImportAt)}` : '')}
+          {account.tracksBalance ? (
+            account.balanceUpdatedAt ? (
+              `Balance updated ${formatDate(account.balanceUpdatedAt)}`
+            ) : (
+              'No balance updates yet'
+            )
+          ) : (
+            <>
+              {isCreditCard && account.statementDay
+                ? `Statement closes the ${ordinal(account.statementDay)} · `
+                : ''}
+              {account.transactionCount} transaction{account.transactionCount === 1 ? '' : 's'}
+              {!isCreditCard &&
+                (account.lastImportAt ? ` · last import ${formatDate(account.lastImportAt)}` : '')}
+            </>
+          )}
         </div>
 
-        <div className="border-line mt-4.5 flex gap-2 border-t pt-4">
+        <div className="border-line mt-4.5 flex flex-wrap gap-2 border-t pt-4">
+          {account.tracksBalance && (
+            <button
+              type="button"
+              onClick={() => setLoggingFor(account)}
+              className="bg-iris text-paper-raised inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] font-medium"
+            >
+              <RefreshCw size={13} />
+              Log balance
+            </button>
+          )}
+          <Link
+            href={`/accounts/${account.id}`}
+            className="border-line text-ink inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[13px]"
+          >
+            <ChartLine size={13} />
+            History
+          </Link>
           <button
             type="button"
             onClick={() => openEdit(account)}
@@ -192,6 +233,19 @@ export const AccountsView = ({
             {lastImportAt ? `As of your ${formatDate(lastImportAt)} import · ` : ''}
             {totalTransactions} transaction{totalTransactions === 1 ? '' : 's'}
           </div>
+          <section aria-label="Net worth over time" className="border-line mt-4 border-t pt-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <BalanceChange
+                change={netWorthHistory.change}
+                rangeLabel={`the last ${netWorthHistory.range} months`}
+              />
+              <HistoryRangePills basePath="/accounts" range={netWorthHistory.range} />
+            </div>
+            <BalanceLineChart
+              points={netWorthHistory.points}
+              label="Net worth at the end of each month"
+            />
+          </section>
         </div>
       )}
 
@@ -222,6 +276,19 @@ export const AccountsView = ({
         title={editing ? 'Edit account' : 'Add account'}
       >
         <AccountForm account={editing} onDone={() => setOpen(false)} zeroBased={zeroBased} />
+      </Modal>
+      <Modal
+        open={loggingFor !== null}
+        onClose={() => setLoggingFor(null)}
+        title={loggingFor ? `Log balance · ${loggingFor.name}` : 'Log balance'}
+      >
+        {loggingFor && (
+          <BalanceUpdateForm
+            accountId={loggingFor.id}
+            currentBalance={loggingFor.balance}
+            onDone={() => setLoggingFor(null)}
+          />
+        )}
       </Modal>
       <ConfirmDialog
         open={confirmDeleteId !== null}

@@ -18,6 +18,7 @@ const { prismaMock } = vi.hoisted(() => {
     reimbursementLink: makeModel(),
     categoryAssignment: makeModel(),
     savingsGoal: makeModel(),
+    accountBalanceUpdate: makeModel(),
     userBudgetSettings: { ...makeModel(), findUnique: vi.fn(), create: vi.fn() },
     // Not part of the 7-model export/import contract. Present only so the two
     // BYOK regression tests below can assert *zero* calls on it.
@@ -45,6 +46,7 @@ beforeEach(() => {
     async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock),
   );
   prismaMock.savingsGoal.findMany.mockResolvedValue([]);
+  prismaMock.accountBalanceUpdate.findMany.mockResolvedValue([]);
 });
 
 describe('exportUserData', () => {
@@ -231,6 +233,7 @@ describe('importUserData', () => {
       reimbursementLinks: 0,
       categoryAssignments: 0,
       savingsGoals: 0,
+      balanceUpdates: 0,
     });
   });
 
