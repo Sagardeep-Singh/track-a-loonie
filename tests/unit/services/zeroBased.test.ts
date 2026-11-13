@@ -46,6 +46,8 @@ type TxRow = {
   date: Date;
   isTransfer: boolean;
   transferMatchId: string | null;
+  spreadStartMonth?: number | null;
+  spreadMonths?: number | null;
 };
 
 /** routes transaction.findMany by query shape: on-budget expenses, transfer
@@ -316,6 +318,39 @@ describe('getZbbMonth', () => {
 
     expect(result.categories.find((c) => c.categoryId === 'food')?.activity).toBe('60.00');
     expect(prismaMock.reimbursementLink.findMany).not.toHaveBeenCalled();
+  });
+
+  it('counts a spread expense through its monthly shares, keeping Ready to Assign whole', async () => {
+    zeroBased();
+    // starting 1000 - the 300 spread payment
+    prismaMock.transaction.groupBy.mockResolvedValue([{ type: 'EXPENSE', _sum: { amount: 300 } }]);
+    mockTransactions({
+      expenses: [
+        {
+          id: 'insurance',
+          categoryId: 'food',
+          amount: 300,
+          date: new Date('2026-10-02'),
+          isTransfer: false,
+          transferMatchId: null,
+          // Aug-Oct; Aug sits before the 202609 start, so it lands in Sep
+          spreadStartMonth: 202608,
+          spreadMonths: 3,
+        },
+      ],
+    });
+
+    const october = await getZbbMonth('user-1', 202610);
+    const food = october.categories.find((c) => c.categoryId === 'food');
+
+    expect(food?.activity).toBe('100.00');
+    expect(food?.carriedIn).toBe('-200.00');
+    // 700 balance - (0 assigned - 300 spent): the full payment is still committed
+    expect(october.readyToAssign).toBe('1000.00');
+
+    const september = await getZbbMonth('user-1', 202609);
+    expect(september.categories.find((c) => c.categoryId === 'food')?.activity).toBe('200.00');
+    expect(september.readyToAssign).toBe('1000.00');
   });
 
   it('reports uncategorized on-budget spending', async () => {

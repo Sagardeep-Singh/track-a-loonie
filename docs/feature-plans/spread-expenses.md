@@ -46,6 +46,10 @@ Assumptions made while planning, flagged rather than silently decided:
   0 to its day's bar and `daySpent`, but is still listed in the day panel with a "Spread" badge
   so the user can see where the money went. Monthly figures (`hero.expense`, the pie, budget
   rings, pace) include the share for that month.
+- **Zero-based category activity uses shares too.** Every share is emitted as an activity cell,
+  future months included, so a category's all-time total still equals the full payment and
+  Ready to Assign (derived from real balances) is unchanged. Only the month each share shows in
+  moves. Shares before the zero-based start month land in the start month.
 - **CSV import never sets a spread.** The user marks it afterward from the edit form. Rules and
   AI categorization are unaffected.
 - **Data export/import round-trips the two new fields.**
@@ -234,6 +238,7 @@ e2e (`tests/e2e/spread-expenses.spec.ts`):
 - [x] `lib/services/budgets.ts`: exclude spread rows, add shares
 - [x] `lib/services/overview.ts`: hero/pie use shares, day bars/daySpent skip spread rows
 - [x] `lib/services/trends.ts`: month and category totals use shares
+- [x] `lib/services/zeroBased.ts`: category activity uses shares (follow-up fix)
 - [x] `lib/services/transfers.ts`: exclude spread rows from matching
 - [x] `lib/services/userData.ts` + `lib/validators/user-data.ts`: export/import new fields
 - [x] `lib/services/transactionsPage.ts`: no change needed (`include` carries the new columns)
