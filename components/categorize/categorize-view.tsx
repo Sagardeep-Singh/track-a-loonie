@@ -7,6 +7,7 @@ import { Check, CheckCheck, SkipForward } from 'lucide-react';
 import { patchJSON, postJSON, type ApiResult } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
+import { Money } from '@/components/ui/money';
 import { Select } from '@/components/ui/field';
 import { Toast } from '@/components/ui/toast';
 import { listItemMotion } from '@/lib/motion/tokens';
@@ -159,7 +160,11 @@ export const CategorizeView = ({
       .map((rows) => ({
         payee: rows[0].payee,
         rows,
-        totalAmount: rows.reduce((sum, r) => sum + Number(r.amount), 0),
+        // signed, so a payee mixing refunds and charges nets out
+        totalAmount: rows.reduce(
+          (sum, r) => sum + (r.type === 'INCOME' ? 1 : -1) * Number(r.amount),
+          0,
+        ),
         meta: rows[0].meta,
         suggestedCategoryId: rows[0].suggestedCategoryId,
         suggestedCategoryName: rows[0].suggestedCategoryName,
@@ -335,9 +340,11 @@ export const CategorizeView = ({
                         {group.meta}
                       </div>
                     </div>
-                    <span className="text-rose font-mono text-sm tabular-nums">
-                      -{group.totalAmount.toFixed(2)}
-                    </span>
+                    <Money
+                      value={group.totalAmount}
+                      tone={group.totalAmount > 0 ? 'income' : 'expense'}
+                      className="text-sm"
+                    />
                   </div>
 
                   {group.suggestedCategoryId ? (
@@ -465,9 +472,11 @@ export const CategorizeView = ({
                     <div className="truncate text-sm font-medium">{row.payee}</div>
                     <div className="text-ink-muted mt-0.5 text-xs">{row.meta}</div>
                   </div>
-                  <span className="text-rose w-24 shrink-0 text-right font-mono text-sm tabular-nums">
-                    -{row.amount}
-                  </span>
+                  <Money
+                    value={row.amount}
+                    tone={row.type === 'INCOME' ? 'income' : 'expense'}
+                    className="w-24 shrink-0 text-right text-sm"
+                  />
                   <div className="text-ink-muted w-[250px] shrink-0 text-[12.5px] leading-snug">
                     {row.why ?? 'No rule matches this transaction.'}
                   </div>
@@ -558,9 +567,11 @@ export const CategorizeView = ({
                     <div className="truncate text-[15px] font-medium">{row.payee}</div>
                     <div className="text-ink-muted mt-0.5 text-xs">{row.meta}</div>
                   </div>
-                  <span className="text-rose shrink-0 font-mono text-base tabular-nums">
-                    -{row.amount}
-                  </span>
+                  <Money
+                    value={row.amount}
+                    tone={row.type === 'INCOME' ? 'income' : 'expense'}
+                    className="shrink-0 text-base"
+                  />
                 </div>
                 <p className="text-ink-muted text-[12.5px] leading-snug">
                   {row.why ?? 'No rule matches this transaction.'}
