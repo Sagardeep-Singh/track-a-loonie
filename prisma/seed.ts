@@ -17,7 +17,10 @@ const main = async (): Promise<void> => {
   await prisma.user.deleteMany();
 
   const passwordHash = await bcrypt.hash(password, 12);
-  const user = await prisma.user.create({ data: { email, passwordHash, name: 'Dev' } });
+  const user = await prisma.user.create({ data: { email, name: 'Dev' } });
+  await prisma.authAccount.create({
+    data: { userId: user.id, providerId: 'credential', accountId: user.id, password: passwordHash },
+  });
 
   await provisionDefaultsForUser(user.id);
 

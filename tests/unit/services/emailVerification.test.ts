@@ -234,9 +234,10 @@ describe('consumeVerificationToken', () => {
     prismaMock.emailVerificationToken.delete.mockResolvedValue({});
 
     await expect(consumeVerificationToken('good')).resolves.toBe('verified');
-    expect(prismaMock.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'user-1' } }),
-    );
+    expect(prismaMock.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { emailVerified: true },
+    });
     expect(prismaMock.emailVerificationToken.delete).toHaveBeenCalledWith({
       where: { userId: 'user-1' },
     });
@@ -244,8 +245,8 @@ describe('consumeVerificationToken', () => {
 });
 
 describe('getEmailVerificationStatus', () => {
-  it('reports verified true when emailVerified is set', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ emailVerified: new Date() });
+  it('reports verified true when emailVerified is true', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ emailVerified: true });
 
     await expect(getEmailVerificationStatus('user-1')).resolves.toEqual({
       verified: true,
@@ -253,8 +254,8 @@ describe('getEmailVerificationStatus', () => {
     });
   });
 
-  it('reports verified false when emailVerified is null', async () => {
-    prismaMock.user.findUnique.mockResolvedValue({ emailVerified: null });
+  it('reports verified false when emailVerified is false', async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ emailVerified: false });
 
     await expect(getEmailVerificationStatus('user-1')).resolves.toEqual({
       verified: false,
