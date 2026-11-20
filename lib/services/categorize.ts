@@ -47,6 +47,7 @@ export type CategorizeQueueRow = {
   payee: string;
   meta: string;
   amount: string;
+  type: 'INCOME' | 'EXPENSE';
   suggestedCategoryId: string | null;
   suggestedCategoryName: string | null;
   why: string | null;
@@ -89,6 +90,7 @@ export const getCategorizeQueue = async (
       payee: tx.payee || tx.note || 'Transaction',
       meta: `${tx.account.name} · ${toDateKey(tx.date)}`,
       amount: Number(tx.amount).toFixed(2),
+      type: tx.type,
       suggestedCategoryId: rule?.categoryId ?? null,
       suggestedCategoryName: rule?.category.name ?? null,
       why: rule ? `A rule matches "${rule.matchText}" in this transaction.` : null,

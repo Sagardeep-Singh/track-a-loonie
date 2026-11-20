@@ -17,6 +17,7 @@ import { getEffectiveLimits } from '@/lib/services/budgets';
 import { ServiceValidationError } from '@/lib/services/common';
 import { getGoalEffects, getGoalTargets } from '@/lib/services/savingsGoals';
 import { fromCents, listReimbursedAmounts, toCents } from '@/lib/services/reimbursements';
+import { allocateSpread } from '@/lib/spread';
 import type {
   BudgetModeInput,
   MoveMoneyInput,
@@ -174,9 +175,11 @@ const onBudgetBalanceCents = async (userId: string, accountIds: string[]): Promi
  * setting, as in `listBudgets`). A transfer leg counts only when its counterpart sits on an
  * off-budget account — money leaving the budget for savings is spending from
  * the budget's point of view; a card payment between two on-budget accounts
- * isn't. Spread expenses deliberately count in their payment month here, not
- * through their monthly shares: Ready to Assign is derived from real account
- * balances, and deferring activity the cash already covered would unbalance it.
+ * isn't. A spread expense counts through its monthly shares, like everywhere
+ * else in reporting. Every share is emitted, future ones included, so the
+ * category totals still sum to the full payment and Ready to Assign (derived
+ * from real balances) stays balanced; only the month each share shows in
+ * moves. A share before the start month lands in the start month.
  */
 const categoryActivity = async (
   userId: string,
@@ -200,6 +203,8 @@ const categoryActivity = async (
       date: true,
       isTransfer: true,
       transferMatchId: true,
+      spreadStartMonth: true,
+      spreadMonths: true,
     },
   });
 
@@ -224,11 +229,14 @@ const categoryActivity = async (
   for (const t of expenses) {
     if (t.isTransfer && !(t.transferMatchId && leavingIds.has(t.transferMatchId))) continue;
     if (!t.isTransfer) onBudgetExpenseIds.add(t.id);
-    cells.push({
-      categoryId: t.categoryId as string,
-      month: monthOfDate(t.date),
-      cents: toCents(t.amount),
-    });
+    const categoryId = t.categoryId as string;
+    if (!t.isTransfer && t.spreadStartMonth != null && t.spreadMonths != null) {
+      for (const share of allocateSpread(toCents(t.amount), t.spreadStartMonth, t.spreadMonths)) {
+        cells.push({ categoryId, month: Math.max(share.month, startMonth), cents: share.cents });
+      }
+      continue;
+    }
+    cells.push({ categoryId, month: monthOfDate(t.date), cents: toCents(t.amount) });
   }
   for (const r of reimbursed) {
     if (!r.categoryId || !onBudgetExpenseIds.has(r.expenseTransactionId)) continue;
