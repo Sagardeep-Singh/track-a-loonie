@@ -15,11 +15,8 @@ import { ScreenHeader } from '@/components/nav/screen-header';
 import { PeriodPopover } from '@/components/dashboard/period-popover';
 import { getStoredPeriod } from '@/lib/period-cookie';
 import { selectionMonth } from '@/lib/period-selection';
-
-const currentMonth = (): number => {
-  const now = new Date();
-  return now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
-};
+import { todayIn } from '@/lib/date';
+import { getViewerTimeZone } from '@/lib/timezone-cookie';
 
 const BudgetsPage = async ({
   searchParams,
@@ -29,10 +26,11 @@ const BudgetsPage = async ({
   const { month: monthParam } = await searchParams;
   const session = await getServerAuthSession();
   const userId = session!.user.id;
+  const today = todayIn(await getViewerTimeZone());
   // No month in the URL: open on the period last picked on any screen.
   const month = monthParam
     ? Number(monthParam)
-    : selectionMonth(await getStoredPeriod(), currentMonth());
+    : selectionMonth(await getStoredPeriod(), today.month);
   const header = (description: string): React.ReactElement => (
     <ScreenHeader
       title="Budgets"
@@ -92,6 +90,7 @@ const BudgetsPage = async ({
         categories={categories.filter((c) => !withGoal.has(c.id))}
         month={month}
         uncategorized={uncategorized}
+        today={today}
       />
       {goalsSection}
     </div>

@@ -10,7 +10,7 @@ import {
   type CategoryHealth,
   type Suggestion,
 } from '@/lib/budgets/zero-based-insights';
-import { daysInMonth, monthOfDate, monthRange, shiftMonth } from '@/lib/date';
+import { daysInMonth, monthOfDate, monthRange, shiftMonth, todayIn } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { currentMonthNumber } from '@/lib/format';
 import { getEffectiveLimits } from '@/lib/services/budgets';
@@ -516,6 +516,8 @@ const LONG_MONTH = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'l
 export const getZbbOverview = async (
   userId: string,
   month: number,
+  /** the viewer's, so pacing counts days on their clock */
+  timeZone = 'UTC',
 ): Promise<FrontendZbbOverview> => {
   const zbb = await getZbbMonth(userId, month);
   const { start, end } = monthRange(month);
@@ -550,14 +552,13 @@ export const getZbbOverview = async (
     targetCents: c.target === null ? null : toCents(c.target),
     isGoal: c.goal !== null,
   }));
-  const isCurrentMonth = month === currentMonthNumber();
+  const today = todayIn(timeZone);
+  const isCurrentMonth = month === today.month;
   const nextMonthAssignedCents = toCents(nextAssigned._sum.amount ?? 0);
 
   const insights = buildZbbInsights({
     month,
-    today: isCurrentMonth
-      ? { day: new Date().getUTCDate(), daysInMonth: daysInMonth(month) }
-      : null,
+    today: isCurrentMonth ? { day: today.day, daysInMonth: daysInMonth(month) } : null,
     readyToAssignCents: toCents(zbb.readyToAssign),
     categories,
     uncategorized: {

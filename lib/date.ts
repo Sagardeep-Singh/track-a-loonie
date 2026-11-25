@@ -69,3 +69,34 @@ export const fromDateKey = (key: string): Date | null => {
  */
 export const todayDateKey = (now: Date = new Date()): string =>
   `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+
+/** Whether `timeZone` is an IANA zone this runtime knows (`America/Toronto`). */
+export const isValidTimeZone = (timeZone: string): boolean => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The calendar month (`YYYYMM`) and day of `now` as seen in `timeZone`.
+ * Server code uses this with the viewer's zone (see `getViewerTimeZone`) so
+ * "this month" flips at the viewer's midnight, not UTC's: a UTC month would
+ * already be next month on a Canadian evening of the last day. An unknown
+ * zone falls back to UTC.
+ */
+export const todayIn = (
+  timeZone: string,
+  now: Date = new Date(),
+): { month: number; day: number } => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: isValidTimeZone(timeZone) ? timeZone : 'UTC',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(now);
+  const part = (type: string): number => Number(parts.find((p) => p.type === type)?.value);
+  return { month: part('year') * 100 + part('month'), day: part('day') };
+};

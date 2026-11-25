@@ -32,11 +32,16 @@ const MONTH_ONLY = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'l
 const monthOnly = (month: number): string =>
   MONTH_ONLY.format(new Date(Date.UTC(Math.floor(month / 100), (month % 100) - 1, 1)));
 
-const paceText = (limit: number, spent: number, month: number): string => {
-  const now = new Date();
-  const currentMonth = now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
+/** `today` is the viewer's date, resolved on the server (see `todayIn`) so
+ * SSR and hydration agree */
+const paceText = (
+  limit: number,
+  spent: number,
+  month: number,
+  today: { month: number; day: number },
+): string => {
   const total = daysInMonth(month);
-  const elapsed = month === currentMonth ? now.getUTCDate() : month > currentMonth ? 0 : total;
+  const elapsed = month === today.month ? today.day : month > today.month ? 0 : total;
   const remaining = Math.max(total - elapsed, 0);
   if (remaining === 0) return spent > limit ? 'Over for the month' : 'On track for the month';
   const perDay = Math.max(limit - spent, 0) / remaining;
@@ -50,10 +55,12 @@ export const BudgetsView = ({
   categories,
   month,
   uncategorized,
+  today,
 }: {
   initialBudgets: FrontendBudget[];
   categories: FrontendCategory[];
   month: number;
+  today: { month: number; day: number };
   uncategorized: UncategorizedMonthSummary;
 }): React.ReactElement => {
   const router = useRouter();
@@ -303,7 +310,7 @@ export const BudgetsView = ({
                         <>
                           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                             <span className="text-ink-muted min-w-0 text-xs">
-                              {paceText(limit, spent, month)}
+                              {paceText(limit, spent, month, today)}
                             </span>
                             <span className="relative z-10 ml-auto flex shrink-0 items-center gap-3">
                               <button

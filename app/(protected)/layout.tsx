@@ -9,6 +9,7 @@ import { listCategories } from '@/lib/services/categories';
 import { getNavCounts } from '@/lib/services/nav';
 import { getEmailVerificationStatus } from '@/lib/services/emailVerification';
 import { UnverifiedEmailBanner } from '@/components/nav/unverified-email-banner';
+import { TimezoneCookieSync } from '@/components/nav/timezone-cookie-sync';
 
 const ProtectedLayout = async ({
   children,
@@ -37,6 +38,7 @@ const ProtectedLayout = async ({
         </div>
       </main>
       <BottomNav counts={counts} />
+      <TimezoneCookieSync />
       <Suspense fallback={null}>
         <AddTransactionOverlay
           // balance-tracked accounts don't take transactions

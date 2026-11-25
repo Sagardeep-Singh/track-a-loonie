@@ -3,11 +3,8 @@ import { requireUserId } from '@/lib/auth/session';
 import { createBudgetSchema } from '@/lib/validators/budgets';
 import { createBudget, listBudgets } from '@/lib/services/budgets';
 import { ServiceValidationError } from '@/lib/services/common';
-
-const currentMonth = (): number => {
-  const now = new Date();
-  return now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
-};
+import { currentMonthNumber } from '@/lib/format';
+import { getViewerTimeZone } from '@/lib/timezone-cookie';
 
 export const GET = async (request: Request): Promise<NextResponse> => {
   const userId = await requireUserId();
@@ -17,7 +14,7 @@ export const GET = async (request: Request): Promise<NextResponse> => {
 
   const url = new URL(request.url);
   const monthParam = url.searchParams.get('month');
-  const month = monthParam ? Number(monthParam) : currentMonth();
+  const month = monthParam ? Number(monthParam) : currentMonthNumber(await getViewerTimeZone());
 
   return NextResponse.json(await listBudgets(userId, month));
 };

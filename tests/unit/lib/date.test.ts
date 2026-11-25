@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { daysInMonth, fromDateKey, monthRange, toDateKey, todayDateKey } from '@/lib/date';
+import {
+  daysInMonth,
+  fromDateKey,
+  isValidTimeZone,
+  monthRange,
+  toDateKey,
+  todayDateKey,
+  todayIn,
+} from '@/lib/date';
 
 describe('monthRange', () => {
   it('returns the month as a half-open UTC range', () => {
@@ -67,5 +75,39 @@ describe('todayDateKey', () => {
     const lateEvening = new Date(2026, 9, 5, 23, 30);
     expect(todayDateKey(lateEvening)).toBe('2026-10-05');
     expect(todayDateKey(new Date(2026, 0, 1, 0, 5))).toBe('2026-01-01');
+  });
+});
+
+describe('isValidTimeZone', () => {
+  it('accepts IANA zones and rejects anything else', () => {
+    expect(isValidTimeZone('America/Toronto')).toBe(true);
+    expect(isValidTimeZone('UTC')).toBe(true);
+    expect(isValidTimeZone('Mars/Olympus_Mons')).toBe(false);
+    expect(isValidTimeZone('')).toBe(false);
+  });
+});
+
+describe('todayIn', () => {
+  // 8pm EST on Nov 30 is already Dec 1 in UTC
+  const lastEvening = new Date('2026-12-01T01:00:00.000Z');
+
+  it("keeps the viewer's month on the evening of the last day", () => {
+    expect(todayIn('America/Toronto', lastEvening)).toEqual({ month: 202611, day: 30 });
+    expect(todayIn('America/Vancouver', lastEvening)).toEqual({ month: 202611, day: 30 });
+  });
+
+  it('matches UTC for UTC', () => {
+    expect(todayIn('UTC', lastEvening)).toEqual({ month: 202612, day: 1 });
+  });
+
+  it('rolls the year for a zone ahead of UTC on Dec 31', () => {
+    expect(todayIn('Asia/Tokyo', new Date('2026-12-31T16:00:00.000Z'))).toEqual({
+      month: 202701,
+      day: 1,
+    });
+  });
+
+  it('falls back to UTC for an unknown zone', () => {
+    expect(todayIn('Not/AZone', lastEvening)).toEqual({ month: 202612, day: 1 });
   });
 });

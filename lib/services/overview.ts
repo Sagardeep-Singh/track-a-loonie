@@ -1,4 +1,4 @@
-import { daysInMonth as daysInMonthOf, monthRange } from '@/lib/date';
+import { daysInMonth as daysInMonthOf, monthRange, todayIn } from '@/lib/date';
 import { prisma } from '@/lib/db/prisma';
 import { listBudgets } from '@/lib/services/budgets';
 import { getCategorizeQueueStats } from '@/lib/services/categorize';
@@ -107,11 +107,6 @@ export type OverviewData = {
   cycleCard: OverviewCycleCard | null;
 };
 
-const currentMonth = (): number => {
-  const now = new Date();
-  return now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
-};
-
 const WEEKDAY_FORMATTER = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' });
 const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeZone: 'UTC',
@@ -121,14 +116,16 @@ const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
 
 export const getOverviewData = async (
   userId: string,
-  options: { month?: number; day?: number } = {},
+  /** `timeZone` is the viewer's, so "this month" and "today" follow their clock */
+  options: { month?: number; day?: number; timeZone?: string } = {},
 ): Promise<OverviewData> => {
-  const month = options.month ?? currentMonth();
+  const today = todayIn(options.timeZone ?? 'UTC');
+  const month = options.month ?? today.month;
   const { start, end } = monthRange(month);
   const daysInMonth = daysInMonthOf(month);
-  const isCurrentMonth = month === currentMonth();
+  const isCurrentMonth = month === today.month;
+  const todayOfMonth = isCurrentMonth ? today.day : daysInMonth;
   const now = new Date();
-  const todayOfMonth = isCurrentMonth ? now.getUTCDate() : daysInMonth;
 
   // By default a reimbursement is income in the month it arrives and the
   // expense stays in full in its own month; with the expense-month setting

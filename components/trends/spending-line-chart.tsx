@@ -1,5 +1,4 @@
 import type { TrendsMonth } from '@/lib/services/trends';
-import { currentMonthNumber } from '@/lib/format';
 
 const money = (value: number): string =>
   new Intl.NumberFormat('en-US', {
@@ -68,7 +67,14 @@ const smoothPath = (values: number[], max: number): string => {
  * rather than the categorical chart-N palette, matching the In/Out
  * convention already used on Overview.
  */
-export const SpendingLineChart = ({ months }: { months: TrendsMonth[] }): React.ReactElement => {
+export const SpendingLineChart = ({
+  months,
+  currentMonth,
+}: {
+  months: TrendsMonth[];
+  /** the viewer's current YYYYMM, resolved on the server */
+  currentMonth: number;
+}): React.ReactElement => {
   const max = Math.max(1, ...months.flatMap((m) => [m.income, m.expense]));
   const income = months.map((m) => m.income);
   const expense = months.map((m) => m.expense);
@@ -147,7 +153,7 @@ export const SpendingLineChart = ({ months }: { months: TrendsMonth[] }): React.
             strokeLinejoin="round"
           />
           {months.map((m, i) => {
-            const isPartial = m.month === currentMonthNumber();
+            const isPartial = m.month === currentMonth;
             return (
               <text
                 key={m.month}
