@@ -33,7 +33,11 @@ export const changePassword = async (
   }
 
   const passwordHash = await bcrypt.hash(input.newPassword, BCRYPT_ROUNDS);
-  await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  // passwordChangedAt revokes every session issued before now (jwt callback)
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash, passwordChangedAt: new Date() },
+  });
 
   return { ok: true };
 };

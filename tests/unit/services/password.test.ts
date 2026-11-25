@@ -91,6 +91,8 @@ describe('changePassword', () => {
 
     const [updateArg] = prismaMock.user.update.mock.calls[0];
     expect(updateArg.where).toEqual({ id: 'user-1' });
+    // revokes sessions issued before the change
+    expect(updateArg.data.passwordChangedAt).toBeInstanceOf(Date);
 
     const storedHash = updateArg.data.passwordHash;
     expect(storedHash).not.toBe(CURRENT_HASH);

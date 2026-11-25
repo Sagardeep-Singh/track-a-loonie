@@ -50,19 +50,22 @@ enum BudgetMode {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String?
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String?
   /// nullable: users who sign up via Google have no password
-  passwordHash String?
+  passwordHash      String?
   /// null = unverified. Google sign-up sets this immediately (Google already
   /// verified the address); credentials sign-up leaves it null until the
   /// emailed link is clicked. Never gates access — see
   /// lib/services/emailVerification.ts and the 2026-09-17 codebase review's
   /// "Signup has no email verification" finding for the accepted-risk
   /// reasoning behind that choice.
-  emailVerified DateTime?
-  createdAt     DateTime  @default(now())
+  emailVerified     DateTime?
+  /// set whenever the password is changed or reset; a session token
+  /// issued before it is rejected (lib/auth/config.ts jwt callback)
+  passwordChangedAt DateTime?
+  createdAt         DateTime  @default(now())
 
   accounts           Account[]
   categories         Category[]

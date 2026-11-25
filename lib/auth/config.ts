@@ -96,6 +96,9 @@ export const authConfig: NextAuthConfig = {
           token.userId = user.id;
         }
         token.name = user.name ?? token.name;
+        // when this session was established, compared against
+        // passwordChangedAt below
+        token.authTime = Date.now();
       }
       // Deleting an account must take effect everywhere immediately, not
       // just for the tab that did the deleting — this is the one callback
@@ -110,12 +113,28 @@ export const authConfig: NextAuthConfig = {
       // loaded or created that row in this same request, so re-checking its
       // existence a line later would be a pointless second lookup — only
       // subsequent reads (no `user` on this call) need it.
+      //
+      // The same lookup revokes sessions on a password change or reset: a
+      // token established before `passwordChangedAt` is dropped, so a stolen
+      // or forgotten session doesn't outlive the new password. Tokens minted
+      // before `authTime` existed fall back to `iat`, which NextAuth refreshes
+      // on every re-encode, so a still-active legacy token is judged by its
+      // last refresh — close enough, and only ever stricter than nothing.
       if (!user && token.userId) {
-        const exists = await prisma.user.findUnique({
+        const current = await prisma.user.findUnique({
           where: { id: token.userId as string },
-          select: { id: true },
+          select: { id: true, passwordChangedAt: true },
         });
-        if (!exists) return null;
+        if (!current) return null;
+        if (current.passwordChangedAt) {
+          const authTime =
+            typeof token.authTime === 'number'
+              ? token.authTime
+              : typeof token.iat === 'number'
+                ? token.iat * 1000
+                : 0;
+          if (authTime < current.passwordChangedAt.getTime()) return null;
+        }
       }
       return token;
     },

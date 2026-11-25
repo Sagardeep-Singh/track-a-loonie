@@ -229,6 +229,9 @@ export const resetPassword = async (input: ResetPasswordInput): Promise<{ ok: tr
         where: { id: token.userId },
         data: {
           passwordHash,
+          // revokes every session issued before the reset, including one
+          // held by whoever prompted the user to reset (jwt callback)
+          passwordChangedAt: new Date(),
           ...(token.user.emailVerified ? {} : { emailVerified: new Date() }),
         },
       }),
