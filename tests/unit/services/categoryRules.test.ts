@@ -2,13 +2,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { prismaMock } = vi.hoisted(() => {
   const prismaMock: {
-    categoryRule: { findMany: ReturnType<typeof vi.fn>; createMany: ReturnType<typeof vi.fn> };
-    category: { findMany: ReturnType<typeof vi.fn>; createMany: ReturnType<typeof vi.fn> };
+    categoryRule: {
+      findMany: ReturnType<typeof vi.fn>;
+      createMany: ReturnType<typeof vi.fn>;
+      findFirst: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+    };
+    category: {
+      findMany: ReturnType<typeof vi.fn>;
+      createMany: ReturnType<typeof vi.fn>;
+      findFirst: ReturnType<typeof vi.fn>;
+    };
     transaction: { findMany: ReturnType<typeof vi.fn> };
     $transaction: ReturnType<typeof vi.fn>;
   } = {
-    categoryRule: { findMany: vi.fn(), createMany: vi.fn() },
-    category: { findMany: vi.fn(), createMany: vi.fn() },
+    categoryRule: { findMany: vi.fn(), createMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    category: { findMany: vi.fn(), createMany: vi.fn(), findFirst: vi.fn() },
     transaction: { findMany: vi.fn() },
     $transaction: vi.fn((cb: (tx: unknown) => unknown) => cb(prismaMock)),
   };
@@ -17,8 +26,13 @@ const { prismaMock } = vi.hoisted(() => {
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: prismaMock }));
 
-const { listCategoryRules, exportCategoryRules, importCategoryRules, previewCategoryRuleImport } =
-  await import('@/lib/services/categoryRules');
+const {
+  listCategoryRules,
+  exportCategoryRules,
+  importCategoryRules,
+  previewCategoryRuleImport,
+  updateCategoryRule,
+} = await import('@/lib/services/categoryRules');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -382,5 +396,50 @@ describe('previewCategoryRuleImport', () => {
 
     expect(result.map((r) => r.status)).toEqual(['will-create', 'will-create']);
     expect(result.every((r) => r.reason === undefined)).toBe(true);
+  });
+});
+
+describe('updateCategoryRule', () => {
+  const existingRule = {
+    id: 'r1',
+    userId: 'user-1',
+    categoryId: 'cat-1',
+    matchText: 'x',
+    priority: 0,
+  };
+  const updatedRule = { ...existingRule, category: { name: 'Groceries' } };
+
+  it("rejects moving a rule to a category the user doesn't own", async () => {
+    prismaMock.categoryRule.findFirst.mockResolvedValue(existingRule);
+    prismaMock.category.findFirst.mockResolvedValue(null);
+
+    await expect(
+      updateCategoryRule('user-1', 'r1', { categoryId: 'cat-someone-else' }),
+    ).rejects.toThrow('Category not found');
+    expect(prismaMock.category.findFirst).toHaveBeenCalledWith({
+      where: { id: 'cat-someone-else', userId: 'user-1' },
+      select: { id: true },
+    });
+    expect(prismaMock.categoryRule.update).not.toHaveBeenCalled();
+  });
+
+  it('moves a rule to an owned category', async () => {
+    prismaMock.categoryRule.findFirst.mockResolvedValue(existingRule);
+    prismaMock.category.findFirst.mockResolvedValue({ id: 'cat-2' });
+    prismaMock.categoryRule.update.mockResolvedValue({ ...updatedRule, categoryId: 'cat-2' });
+
+    const rule = await updateCategoryRule('user-1', 'r1', { categoryId: 'cat-2' });
+
+    expect(rule.categoryId).toBe('cat-2');
+  });
+
+  it('skips the category lookup when the category is unchanged or absent', async () => {
+    prismaMock.categoryRule.findFirst.mockResolvedValue(existingRule);
+    prismaMock.categoryRule.update.mockResolvedValue(updatedRule);
+
+    await updateCategoryRule('user-1', 'r1', { matchText: 'y' });
+    await updateCategoryRule('user-1', 'r1', { categoryId: 'cat-1' });
+
+    expect(prismaMock.category.findFirst).not.toHaveBeenCalled();
   });
 });

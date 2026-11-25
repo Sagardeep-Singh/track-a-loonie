@@ -162,6 +162,15 @@ export const updateCategoryRule = async (
   if (!existing) {
     throw new ServiceValidationError('Rule not found');
   }
+  if (input.categoryId !== undefined && input.categoryId !== existing.categoryId) {
+    const category = await prisma.category.findFirst({
+      where: { id: input.categoryId, userId },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new ServiceValidationError('Category not found');
+    }
+  }
 
   const rule = await prisma.categoryRule.update({
     where: { id: ruleId },
