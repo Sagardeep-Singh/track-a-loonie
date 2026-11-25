@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db/prisma';
 import { toSerializable } from '@/lib/utils';
 import { ServiceValidationError } from '@/lib/services/common';
 import { assertNoActiveLinks } from '@/lib/services/reimbursements';
+import { transferMatchIdsOf, unlinkTransferLegs } from '@/lib/services/transfers';
 import type { CreateAccountInput, UpdateAccountInput } from '@/lib/validators/accounts';
 
 export type FrontendAccount = {
@@ -199,7 +200,7 @@ export const updateAccount = async (
 export const deleteAccount = async (userId: string, accountId: string): Promise<void> => {
   const existing = await prisma.account.findFirst({
     where: { id: accountId, userId },
-    include: { transactions: { select: { id: true } } },
+    include: { transactions: { select: { id: true, transferMatchId: true } } },
   });
   if (!existing) {
     throw new ServiceValidationError('Account not found');
@@ -212,5 +213,13 @@ export const deleteAccount = async (userId: string, accountId: string): Promise<
     existing.transactions.map((t) => t.id),
     'This account has transactions linked to reimbursements. Remove those links before deleting it.',
   );
-  await prisma.account.delete({ where: { id: accountId } });
+  const deleteRow = prisma.account.delete({ where: { id: accountId } });
+  // a transfer leg on this account usually has its partner on another one;
+  // un-mark it so it counts again (see unlinkTransferLegs)
+  const matchIds = transferMatchIdsOf(existing.transactions);
+  if (matchIds.length > 0) {
+    await prisma.$transaction([unlinkTransferLegs(prisma, userId, matchIds), deleteRow]);
+    return;
+  }
+  await deleteRow;
 };

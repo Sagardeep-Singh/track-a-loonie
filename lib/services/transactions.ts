@@ -12,6 +12,7 @@ import {
   toCents,
   type ReimbursementStatus,
 } from '@/lib/services/reimbursements';
+import { unlinkTransferLegs } from '@/lib/services/transfers';
 import { allocateSpread, SPREAD_MAX_START_OFFSET, spreadEndMonth } from '@/lib/spread';
 import type {
   CreateTransactionInput,
@@ -440,7 +441,17 @@ export const deleteTransaction = async (userId: string, transactionId: string): 
     [transactionId],
     'This transaction has reimbursement links. Remove them before deleting it.',
   );
-  await prisma.transaction.delete({ where: { id: transactionId } });
+  const deleteRow = prisma.transaction.delete({ where: { id: transactionId } });
+  // deleting one leg of a matched transfer un-marks the other, same as
+  // un-marking it in updateTransaction
+  if (existing.transferMatchId) {
+    await prisma.$transaction([
+      unlinkTransferLegs(prisma, userId, [existing.transferMatchId]),
+      deleteRow,
+    ]);
+    return;
+  }
+  await deleteRow;
 };
 
 export const skipTransaction = async (userId: string, transactionId: string): Promise<void> => {

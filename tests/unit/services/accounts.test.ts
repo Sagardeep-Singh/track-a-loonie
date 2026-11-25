@@ -10,6 +10,8 @@ const { prismaMock } = vi.hoisted(() => ({
       delete: vi.fn(),
     },
     reimbursementLink: { count: vi.fn() },
+    transaction: { updateMany: vi.fn() },
+    $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
   },
 }));
 
@@ -219,6 +221,40 @@ describe('deleteAccount reimbursement guard', () => {
 
     expect(prismaMock.reimbursementLink.count).not.toHaveBeenCalled();
     expect(prismaMock.account.delete).toHaveBeenCalledWith({ where: { id: 'acc-1' } });
+  });
+});
+
+describe('deleteAccount transfer partners', () => {
+  it('un-marks partner legs of matched transfers alongside the delete', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({
+      id: 'acc-1',
+      transactions: [
+        { id: 'tx-1', transferMatchId: 'match-1' },
+        { id: 'tx-2', transferMatchId: null },
+        { id: 'tx-3', transferMatchId: 'match-2' },
+      ],
+    });
+
+    await deleteAccount('user-1', 'acc-1');
+
+    expect(prismaMock.transaction.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', transferMatchId: { in: ['match-1', 'match-2'] } },
+      data: { isTransfer: false, transferMatchId: null },
+    });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.account.delete).toHaveBeenCalledWith({ where: { id: 'acc-1' } });
+  });
+
+  it('skips the unlink when no transaction on the account is a matched transfer', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({
+      id: 'acc-1',
+      transactions: [{ id: 'tx-1', transferMatchId: null }],
+    });
+
+    await deleteAccount('user-1', 'acc-1');
+
+    expect(prismaMock.transaction.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.account.delete).toHaveBeenCalled();
   });
 });
 
