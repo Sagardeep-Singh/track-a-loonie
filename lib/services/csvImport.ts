@@ -188,6 +188,19 @@ export const commitImport = async (
     throw new ServiceValidationError(TRACKED_ACCOUNT_MESSAGE);
   }
 
+  // Rows carry their own categoryId (preview suggestion or the user's pick).
+  // The FK alone doesn't scope by user, so check every distinct id is ours
+  // before it lands on a transaction.
+  const categoryIds = [
+    ...new Set(input.rows.flatMap((r) => (r.include && r.categoryId ? [r.categoryId] : []))),
+  ];
+  if (categoryIds.length > 0) {
+    const owned = await prisma.category.count({ where: { userId, id: { in: categoryIds } } });
+    if (owned !== categoryIds.length) {
+      throw new ServiceValidationError('Category not found');
+    }
+  }
+
   // Ordering is normative: the filename gate runs *before* row-level dedupe and
   // before the zero-row early return. Re-importing an identical file makes every
   // row a row-level duplicate, which would otherwise return `imported: 0` and never

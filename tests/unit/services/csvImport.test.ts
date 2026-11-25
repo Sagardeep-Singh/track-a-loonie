@@ -4,7 +4,7 @@ import { commitImportSchema, previewImportSchema } from '@/lib/validators/csv-im
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
     categoryRule: { findMany: vi.fn() },
-    category: { findMany: vi.fn() },
+    category: { findMany: vi.fn(), count: vi.fn() },
     transaction: { findMany: vi.fn(), createMany: vi.fn() },
     account: { findFirst: vi.fn() },
     importBatch: { findFirst: vi.fn(), create: vi.fn() },
@@ -243,6 +243,58 @@ describe('commitImport', () => {
     await expect(
       commit({ accountId: 'acc-missing', filename: 'march.csv', rows: [commitRow()] }),
     ).rejects.toThrow(ServiceValidationError);
+  });
+
+  it("rejects a row whose categoryId isn't one of the user's categories", async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1' });
+    prismaMock.category.count.mockResolvedValue(1);
+
+    await expect(
+      commit({
+        accountId: 'acc-1',
+        filename: 'march.csv',
+        rows: [
+          commitRow({ categoryId: 'cat-mine' }),
+          commitRow({ amount: 7, categoryId: 'cat-someone-else' }),
+        ],
+      }),
+    ).rejects.toThrow('Category not found');
+    expect(prismaMock.category.count).toHaveBeenCalledWith({
+      where: { userId: 'user-1', id: { in: ['cat-mine', 'cat-someone-else'] } },
+    });
+    expect(prismaMock.importBatch.create).not.toHaveBeenCalled();
+    expect(prismaMock.transaction.createMany).not.toHaveBeenCalled();
+  });
+
+  it('imports rows whose categories are all owned, checking each distinct id once', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1' });
+    prismaMock.category.count.mockResolvedValue(1);
+    prismaMock.transaction.createMany.mockResolvedValue({ count: 2 });
+
+    await commit({
+      accountId: 'acc-1',
+      filename: 'march.csv',
+      rows: [
+        commitRow({ categoryId: 'cat-1' }),
+        commitRow({ amount: 7, categoryId: 'cat-1' }),
+        // excluded rows never land, so their category isn't checked
+        commitRow({ amount: 9, categoryId: 'cat-ignored', include: false }),
+      ],
+    });
+
+    expect(prismaMock.category.count).toHaveBeenCalledWith({
+      where: { userId: 'user-1', id: { in: ['cat-1'] } },
+    });
+    expect(prismaMock.transaction.createMany).toHaveBeenCalled();
+  });
+
+  it('skips the category check when no included row has a category', async () => {
+    prismaMock.account.findFirst.mockResolvedValue({ id: 'acc-1' });
+    prismaMock.transaction.createMany.mockResolvedValue({ count: 1 });
+
+    await commit({ accountId: 'acc-1', filename: 'march.csv', rows: [commitRow()] });
+
+    expect(prismaMock.category.count).not.toHaveBeenCalled();
   });
 
   it('only creates transactions for rows marked include', async () => {
