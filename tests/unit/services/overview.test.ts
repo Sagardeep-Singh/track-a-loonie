@@ -746,3 +746,25 @@ describe('getOverviewData', () => {
     expect(result.selectedDay.spent).toBe('400.00');
   });
 });
+
+describe('getOverviewData viewer timezone', () => {
+  it("defaults to the viewer's month and day, not UTC's, on the evening of the last day", async () => {
+    vi.useFakeTimers();
+    // 8pm EST on Nov 30 is Dec 1 in UTC
+    vi.setSystemTime(new Date('2026-12-01T01:00:00.000Z'));
+    try {
+      prismaMock.budget.findMany.mockResolvedValue([]);
+      prismaMock.transaction.groupBy.mockResolvedValue([]);
+      prismaMock.account.findFirst.mockResolvedValue(null);
+      prismaMock.transaction.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      prismaMock.categoryRule.findMany.mockResolvedValue([]);
+
+      const result = await getOverviewData('user-1', { timeZone: 'America/Toronto' });
+
+      expect(result.month).toBe(202611);
+      expect(result.selectedDay.day).toBe(30);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -19,6 +19,8 @@ import {
 } from '@/lib/dashboard/drilldown';
 import { cn } from '@/lib/cn';
 import { getStoredPeriod } from '@/lib/period-cookie';
+import { getViewerTimeZone } from '@/lib/timezone-cookie';
+import { currentMonthNumber } from '@/lib/format';
 import { getBudgetSettings, getZbbOverview } from '@/lib/services/zeroBased';
 import {
   ZbbAllocationCard,
@@ -42,11 +44,6 @@ const monthRangeLabel = (month: number): string => {
   return `${label} 1–${daysInMonth}, ${year}`;
 };
 
-const currentMonthNum = (): number => {
-  const now = new Date();
-  return now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
-};
-
 const DashboardPage = async ({
   searchParams,
 }: {
@@ -55,14 +52,15 @@ const DashboardPage = async ({
   const { day, month } = await searchParams;
   const session = await getServerAuthSession();
   const userId = session!.user.id;
+  const timeZone = await getViewerTimeZone();
+  const currentMonth = currentMonthNumber(timeZone);
   // No month in the URL: open on the period last picked on any screen.
-  const storedMonth = month
-    ? undefined
-    : selectionMonth(await getStoredPeriod(), currentMonthNum());
+  const storedMonth = month ? undefined : selectionMonth(await getStoredPeriod(), currentMonth);
   const [data, budgetSettings] = await Promise.all([
     getOverviewData(userId, {
       day: day ? Number(day) : undefined,
       month: month ? Number(month) : storedMonth,
+      timeZone,
     }),
     getBudgetSettings(userId),
   ]);
@@ -73,7 +71,7 @@ const DashboardPage = async ({
     budgetSettings.mode === 'ZERO_BASED' &&
     budgetSettings.zbbStartMonth !== null &&
     data.month >= budgetSettings.zbbStartMonth
-      ? await getZbbOverview(userId, data.month)
+      ? await getZbbOverview(userId, data.month, timeZone)
       : null;
   const zbbMonthShort = RANGE_MONTH.format(
     new Date(Date.UTC(Math.floor(data.month / 100), (data.month % 100) - 1, 1)),
@@ -259,7 +257,7 @@ const DashboardPage = async ({
             <>
               <span className="hidden lg:inline">Here&rsquo;s where things stand this month.</span>
               <span className="lg:hidden">
-                {data.month < currentMonthNum() ? 'Closed month' : 'Open month'} ·{' '}
+                {data.month < currentMonth ? 'Closed month' : 'Open month'} ·{' '}
                 {monthRangeLabel(data.month)}
               </span>
             </>

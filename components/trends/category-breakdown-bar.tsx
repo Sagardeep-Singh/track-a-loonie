@@ -1,5 +1,4 @@
 import type { TrendsCategory, TrendsCategoryMonth, TrendsMonth } from '@/lib/services/trends';
-import { currentMonthNumber, daysElapsedInMonth } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { GrowBar } from '@/components/motion/grow-bar';
 
@@ -15,11 +14,16 @@ const money = (value: number): string =>
  */
 export const CategoryBreakdownBar = ({
   months,
+  currentMonth,
+  currentMonthElapsedDays,
   categories,
   breakdown,
   uncategorizedCount,
 }: {
   months: TrendsMonth[];
+  /** the viewer's current YYYYMM and days elapsed in it, resolved on the server */
+  currentMonth: number;
+  currentMonthElapsedDays: number;
   categories: TrendsCategory[];
   breakdown: TrendsCategoryMonth[];
   uncategorizedCount: number;
@@ -29,7 +33,7 @@ export const CategoryBreakdownBar = ({
   );
   const maxTotal = Math.max(1, ...totalByMonth.values());
   const isEmpty = categories.length === 0;
-  const inProgress = months.find((m) => m.month === currentMonthNumber());
+  const inProgress = months.find((m) => m.month === currentMonth);
 
   return (
     <div>
@@ -66,8 +70,8 @@ export const CategoryBreakdownBar = ({
             const monthLabel = months.find((m) => m.month === monthBreakdown.month)?.label ?? '';
             const total = totalByMonth.get(monthBreakdown.month) ?? 0;
             const barHeight = Math.round((total / maxTotal) * 100);
-            const isInProgress = monthBreakdown.month === currentMonthNumber();
-            const elapsedDays = isInProgress ? daysElapsedInMonth(monthBreakdown.month) : null;
+            const isInProgress = monthBreakdown.month === currentMonth;
+            const elapsedDays = isInProgress ? currentMonthElapsedDays : null;
             return (
               // min-w-0: without it a column can't shrink below its label, so
               // a long label pushed the last bar out of the card at 12 months.
@@ -120,7 +124,7 @@ export const CategoryBreakdownBar = ({
       )}
       {!isEmpty && inProgress && (
         <p className="text-ink-muted mt-3 text-[11.5px]">
-          * {inProgress.label} in progress, {daysElapsedInMonth(inProgress.month)} days so far
+          * {inProgress.label} in progress, {currentMonthElapsedDays} days so far
         </p>
       )}
     </div>

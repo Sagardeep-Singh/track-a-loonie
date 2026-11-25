@@ -11,6 +11,7 @@ import { SpendingMovers } from '@/components/trends/spending-movers';
 import { currentMonthNumber, daysElapsedInMonth } from '@/lib/format';
 import { monthToRange, selectionMonth } from '@/lib/period-selection';
 import { getStoredPeriod } from '@/lib/period-cookie';
+import { getViewerTimeZone } from '@/lib/timezone-cookie';
 
 const VALID_RANGES: TrendsRange[] = [3, 6, 12];
 
@@ -35,11 +36,6 @@ const parseRange = (value?: string): TrendsRange => {
   return VALID_RANGES.includes(n as TrendsRange) ? (n as TrendsRange) : 3;
 };
 
-const currentMonth = (): number => {
-  const now = new Date();
-  return now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
-};
-
 const TrendsPage = async ({
   searchParams,
 }: {
@@ -48,10 +44,12 @@ const TrendsPage = async ({
   const { month: monthParam, range: rangeParam } = await searchParams;
   const session = await getServerAuthSession();
   const userId = session!.user.id;
+  const timeZone = await getViewerTimeZone();
+  const currentMonth = currentMonthNumber(timeZone);
   // No month in the URL: open on the period last picked on any screen.
   const month = monthParam
     ? Number(monthParam)
-    : selectionMonth(await getStoredPeriod(), currentMonth());
+    : selectionMonth(await getStoredPeriod(), currentMonth);
   const range = parseRange(rangeParam);
   const data = await getSpendingTrends(userId, { month, range });
 
@@ -59,12 +57,16 @@ const TrendsPage = async ({
 
   const firstMonth = data.months[0]!.month;
   const lastMonth = data.months[data.months.length - 1]!.month;
-  const lastMonthInProgress = lastMonth === currentMonthNumber();
+  const lastMonthInProgress = lastMonth === currentMonth;
   const rangeStartLabel = DAY_MONTH_FORMAT.format(monthStartDate(firstMonth));
   const rangeEndDate = lastMonthInProgress
     ? new Date()
     : new Date(
-        Date.UTC(Math.floor(lastMonth / 100), (lastMonth % 100) - 1, daysElapsedInMonth(lastMonth)),
+        Date.UTC(
+          Math.floor(lastMonth / 100),
+          (lastMonth % 100) - 1,
+          daysElapsedInMonth(lastMonth, timeZone),
+        ),
       );
   const rangeEndLabel = DAY_MONTH_YEAR_FORMAT.format(rangeEndDate);
   const subtitle = lastMonthInProgress
@@ -121,7 +123,7 @@ const TrendsPage = async ({
               <div className="mb-4.5 flex items-baseline justify-between">
                 <h2 className="font-display text-base font-semibold">Income vs. expense</h2>
               </div>
-              <SpendingLineChart months={data.months} />
+              <SpendingLineChart months={data.months} currentMonth={currentMonth} />
             </div>
 
             <div className="border-line bg-paper-raised rounded-[18px] border p-5.5">
@@ -130,6 +132,8 @@ const TrendsPage = async ({
               </div>
               <CategoryBreakdownBar
                 months={data.months}
+                currentMonth={currentMonth}
+                currentMonthElapsedDays={daysElapsedInMonth(currentMonth, timeZone)}
                 categories={data.categories}
                 breakdown={data.categoryBreakdown}
                 uncategorizedCount={data.uncategorizedCount}

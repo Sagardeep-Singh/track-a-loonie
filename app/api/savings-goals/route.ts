@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireUserId } from '@/lib/auth/session';
 import { currentMonthNumber } from '@/lib/format';
+import { getViewerTimeZone } from '@/lib/timezone-cookie';
 import { ServiceValidationError } from '@/lib/services/common';
 import { createSavingsGoal, listSavingsGoals } from '@/lib/services/savingsGoals';
 import { createSavingsGoalSchema, savingsGoalsQuerySchema } from '@/lib/validators/savings-goals';
@@ -21,9 +22,13 @@ export const GET = async (request: Request): Promise<NextResponse> => {
   }
 
   return NextResponse.json(
-    await listSavingsGoals(userId, parsed.data.month ?? currentMonthNumber(), {
-      includeArchived: parsed.data.includeArchived,
-    }),
+    await listSavingsGoals(
+      userId,
+      parsed.data.month ?? currentMonthNumber(await getViewerTimeZone()),
+      {
+        includeArchived: parsed.data.includeArchived,
+      },
+    ),
   );
 };
 
