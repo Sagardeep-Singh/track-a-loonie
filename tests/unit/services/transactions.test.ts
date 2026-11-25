@@ -410,6 +410,38 @@ describe('deleteTransaction reimbursement guard', () => {
   });
 });
 
+describe('deleteTransaction transfer partner', () => {
+  it('un-marks the partner leg in the same transaction when deleting a matched leg', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      id: 'tx-1',
+      accountId: 'acc-1',
+      transferMatchId: 'match-1',
+    });
+
+    await deleteTransaction('user-1', 'tx-1');
+
+    expect(prismaMock.transaction.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', transferMatchId: { in: ['match-1'] } },
+      data: { isTransfer: false, transferMatchId: null },
+    });
+    expect(prismaMock.transaction.delete).toHaveBeenCalledWith({ where: { id: 'tx-1' } });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('touches no other row when the transaction is not a matched transfer', async () => {
+    prismaMock.transaction.findFirst.mockResolvedValue({
+      id: 'tx-1',
+      accountId: 'acc-1',
+      transferMatchId: null,
+    });
+
+    await deleteTransaction('user-1', 'tx-1');
+
+    expect(prismaMock.transaction.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.transaction.delete).toHaveBeenCalledWith({ where: { id: 'tx-1' } });
+  });
+});
+
 describe('updateTransaction reimbursement blocking rules', () => {
   it('1: blocks changing type off EXPENSE while the row has an active expense-side link', async () => {
     prismaMock.transaction.findFirst.mockResolvedValue({

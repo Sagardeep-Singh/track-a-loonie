@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
     importBatch: { findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
-    transaction: { deleteMany: vi.fn() },
+    transaction: { deleteMany: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
     reimbursementLink: { count: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -46,6 +46,7 @@ beforeEach(() => {
     async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock),
   );
   prismaMock.reimbursementLink.count.mockResolvedValue(0);
+  prismaMock.transaction.findMany.mockResolvedValue([]);
 });
 
 describe('normalizeFilename', () => {
@@ -227,6 +228,41 @@ describe('getImportBatch', () => {
 });
 
 describe('undoImportBatch', () => {
+  it('un-marks transfer pairs that have a leg in the batch before deleting it', async () => {
+    prismaMock.importBatch.findFirst.mockResolvedValue(dbBatch());
+    prismaMock.transaction.findMany.mockResolvedValue([
+      { transferMatchId: 'match-1' },
+      { transferMatchId: 'match-1' },
+      { transferMatchId: 'match-2' },
+    ]);
+    prismaMock.transaction.deleteMany.mockResolvedValue({ count: 8 });
+    prismaMock.importBatch.update.mockResolvedValue(dbBatch({ status: 'UNDONE' }));
+
+    await undoImportBatch('user-1', 'batch-1');
+
+    expect(prismaMock.transaction.findMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', importBatchId: 'batch-1', transferMatchId: { not: null } },
+      select: { transferMatchId: true },
+    });
+    expect(prismaMock.transaction.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', transferMatchId: { in: ['match-1', 'match-2'] } },
+      data: { isTransfer: false, transferMatchId: null },
+    });
+    const unlinkOrder = prismaMock.transaction.updateMany.mock.invocationCallOrder[0];
+    const deleteOrder = prismaMock.transaction.deleteMany.mock.invocationCallOrder[0];
+    expect(unlinkOrder).toBeLessThan(deleteOrder);
+  });
+
+  it('skips the unlink when no row in the batch is a matched transfer', async () => {
+    prismaMock.importBatch.findFirst.mockResolvedValue(dbBatch());
+    prismaMock.transaction.deleteMany.mockResolvedValue({ count: 8 });
+    prismaMock.importBatch.update.mockResolvedValue(dbBatch({ status: 'UNDONE' }));
+
+    await undoImportBatch('user-1', 'batch-1');
+
+    expect(prismaMock.transaction.updateMany).not.toHaveBeenCalled();
+  });
+
   it('deletes the batch transactions and flips the batch to undone', async () => {
     prismaMock.importBatch.findFirst.mockResolvedValue(dbBatch());
     prismaMock.transaction.deleteMany.mockResolvedValue({ count: 8 });

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/prisma';
 
 /**
@@ -137,3 +138,27 @@ export const matchTransfers = async (
 
   return { matched: pairs.length };
 };
+
+/**
+ * Un-marks every leg of the given matched transfers. Call it in the same
+ * database transaction that deletes one or more legs (a single delete, an
+ * import undo, an account delete): the surviving partner would otherwise keep
+ * `isTransfer` with a dangling `transferMatchId`, silently drop out of every
+ * total, and never be re-matchable since `matchTransfers` skips transfers.
+ * The legs being deleted are updated too, which is harmless and avoids a
+ * NOT filter over nullable columns.
+ */
+export const unlinkTransferLegs = (
+  db: Pick<Prisma.TransactionClient, 'transaction'>,
+  userId: string,
+  transferMatchIds: string[],
+): Prisma.PrismaPromise<Prisma.BatchPayload> =>
+  db.transaction.updateMany({
+    where: { userId, transferMatchId: { in: transferMatchIds } },
+    data: { isTransfer: false, transferMatchId: null },
+  });
+
+/** distinct non-null transferMatchIds across `rows` */
+export const transferMatchIdsOf = (rows: { transferMatchId: string | null }[]): string[] => [
+  ...new Set(rows.flatMap((r) => (r.transferMatchId ? [r.transferMatchId] : []))),
+];

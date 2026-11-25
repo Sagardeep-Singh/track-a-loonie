@@ -4,6 +4,7 @@ import {
   ReimbursementConflictError,
   ServiceValidationError,
 } from '@/lib/services/common';
+import { transferMatchIdsOf, unlinkTransferLegs } from '@/lib/services/transfers';
 import type { ListImportBatchesQuery } from '@/lib/validators/import-batches';
 
 export type FrontendImportBatch = {
@@ -150,6 +151,18 @@ export const undoImportBatch = async (
       throw new ReimbursementConflictError(
         'Some transactions in this import are linked to reimbursements. Remove those links before undoing it.',
       );
+    }
+
+    // a leg in this batch may be matched to one outside it (the other bank's
+    // statement, a manual entry); un-mark the pair so the survivor counts again
+    const matchIds = transferMatchIdsOf(
+      await tx.transaction.findMany({
+        where: { userId, importBatchId: batchId, transferMatchId: { not: null } },
+        select: { transferMatchId: true },
+      }),
+    );
+    if (matchIds.length > 0) {
+      await unlinkTransferLegs(tx, userId, matchIds);
     }
 
     const deleted = await tx.transaction.deleteMany({
