@@ -246,7 +246,11 @@ describe('resetPassword', () => {
     });
     expect(prismaMock.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
-      data: { passwordHash: 'new-hash', emailVerified: expect.any(Date) },
+      data: {
+        passwordHash: 'new-hash',
+        passwordChangedAt: expect.any(Date),
+        emailVerified: expect.any(Date),
+      },
     });
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
   });
@@ -262,7 +266,7 @@ describe('resetPassword', () => {
 
     expect(prismaMock.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
-      data: { passwordHash: 'new-hash' },
+      data: { passwordHash: 'new-hash', passwordChangedAt: expect.any(Date) },
     });
   });
 
